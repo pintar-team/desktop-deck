@@ -12,6 +12,7 @@ cmake -S Vendor/LibVNCServer -B .build/native -G Ninja \
   -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
   -DCMAKE_OSX_SYSROOT="$SDKROOT" \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET=26.0 \
+  -DCMAKE_C_FLAGS="-ffile-prefix-map=\"$HOME\"=/build -ffile-prefix-map=\"$ROOT\"=/source" \
   -DCMAKE_INSTALL_PREFIX="$ROOT/.native" -DBUILD_SHARED_LIBS=OFF \
   -DWITH_EXAMPLES=OFF -DWITH_TESTS=OFF -DWITH_OPENSSL=ON -DWITH_GNUTLS=OFF \
   -DOPENSSL_ROOT_DIR="$OPENSSL_PREFIX" -DOPENSSL_USE_STATIC_LIBS=ON \
@@ -28,7 +29,10 @@ cp .build/native/libvncclient.a .native/lib/
 cp -f "$JPEG_PREFIX/lib/libjpeg.a" .native/lib/
 cp -f "$OPENSSL_PREFIX/lib/libssl.a" "$OPENSSL_PREFIX/lib/libcrypto.a" .native/lib/
 echo '[3/4] Building Swift application and MCP'
-swift build -c "$MODE" --jobs 4
+swift build -c "$MODE" --jobs 4 \
+  -Xswiftc -file-prefix-map -Xswiftc "$HOME=/build" \
+  -Xswiftc -file-prefix-map -Xswiftc "$ROOT=/source" \
+  -Xcc "-ffile-prefix-map=$HOME=/build" -Xcc "-ffile-prefix-map=$ROOT=/source"
 BIN="$(swift build -c "$MODE" --show-bin-path)"
 APP="$ROOT/dist/Desktop Deck.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
@@ -57,5 +61,8 @@ python3 scripts/dependency-receipt.py > "$APP/Contents/Resources/dependencies.js
 for bundle in "$BIN"/*.bundle; do
   if [ -d "$bundle" ]; then cp -R "$bundle" "$APP/Contents/Resources/"; fi
 done
+if [ "$MODE" = release ]; then
+  strip -S -x "$APP/Contents/MacOS/DesktopDeck" "$APP/Contents/MacOS/desktop-deck-mcp"
+fi
 codesign --force --deep --sign - "$APP"
 echo "[4/4] Built $APP"

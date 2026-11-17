@@ -12,14 +12,22 @@ A native macOS workspace for VNC desktops and SSH terminals, with local MCP tool
 
 Desktop Deck uses unmodified upstream libraries for VNC decoding and terminal emulation. TurboVNC Session Manager is optional; direct VNC and plain SSH work independently.
 
-## Requirements
+## Download for Mac
+
+Download the **DMG** from [GitHub Releases](https://github.com/pintar-team/desktop-deck/releases/latest), open it, and drag **Desktop Deck.app** into **Applications**. A ZIP containing the same app is also available. No Xcode, Homebrew or compilation is needed to run it.
+
+Requires **Apple Silicon (M1 or later)** and **macOS 26 or later**. Intel Macs and earlier macOS versions are not supported by this binary.
+
+The app is ad-hoc signed and has not been notarized by Apple. If macOS blocks the first launch, follow [Apple's instructions](https://support.apple.com/en-us/102445) for **System Settings → Privacy & Security → Open Anyway** after checking the download's origin. SHA-256 checksums and a source/dependency manifest accompany each release.
+
+## Build requirements
 
 - Apple Silicon Mac running macOS 26 or later.
 - Xcode 26 or later, command-line tools selected and the Xcode license accepted.
 - CMake, Ninja, libjpeg-turbo and OpenSSL 3.
 - Python 3 for packaging and the MCP smoke check.
 
-The current build targets arm64/macOS 26 and uses static Homebrew libraries. It is ad-hoc signed; a notarized binary release is not provided.
+The current build targets arm64/macOS 26 and uses static Homebrew libraries.
 
 ## Build and install
 
@@ -93,6 +101,8 @@ The MCP smoke check requires the app to be open and sends no remote input. Unit 
 Linux host metrics and macOS probes have been exercised live. The Windows PowerShell/CIM collector has not yet been tested on a live Windows host. Direct VNC security types and server-specific extensions vary; inspect reported errors and capabilities.
 
 See [architecture and dependencies](docs/architecture.md) for pinned upstream versions, ownership boundaries and compatibility adapters.
+
+Maintainers: see [release packaging](docs/releases.md) for the standalone ZIP/DMG recipe.
 
 ## License
 
