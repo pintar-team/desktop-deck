@@ -17,6 +17,7 @@ import AppKit
     private let isCurrent: ()->Bool
     private var completed=false
     private var scheduled=false
+    private(set) var status="pending"
     init(id: UUID,profile: UUID,terminal: UUID?,window: NSWindow?,isCurrent: @escaping ()->Bool) {
         self.id=id;self.profile=profile;self.terminal=terminal
         originWindow=window;originResponder=window?.firstResponder;self.isCurrent=isCurrent
@@ -33,13 +34,17 @@ import AppKit
     }
     func apply(to view: NSView) {
         guard !completed else {return}
-        guard isCurrent(),let originWindow else {completed=true;return}
-        guard let window=view.window else {return}
-        guard window===originWindow,window.isKeyWindow,window.attachedSheet==nil else {completed=true;return}
-        guard !view.isHiddenOrHasHiddenAncestor,!view.bounds.isEmpty else {return}
+        guard isCurrent() else {cancel("superseded");return}
+        guard let originWindow else {cancel("no-source-window");return}
+        guard let window=view.window else {status="awaiting-view";return}
+        guard window===originWindow else {cancel("window-changed");return}
+        guard window.isKeyWindow else {cancel("window-inactive");return}
+        guard window.attachedSheet==nil else {cancel("sheet-open");return}
+        guard !view.isHiddenOrHasHiddenAncestor,!view.bounds.isEmpty else {status="awaiting-layout";return}
         let current=window.firstResponder
-        guard current===originResponder || current===window || current==nil || view.ownsKeyboardFocus else {completed=true;return}
+        if (current is NSTextView || current is NSTextField),current !== originResponder,!view.ownsKeyboardFocus {cancel("editing-changed");return}
         completed=true
-        window.makeFirstResponder(view)
+        status=window.makeFirstResponder(view) ? "focused":"declined"
     }
+    private func cancel(_ reason: String) {completed=true;status=reason}
 }

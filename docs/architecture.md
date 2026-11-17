@@ -15,3 +15,5 @@ The app icon is generated with the built-in imagegen tool. Its editable source a
 The native video surface accepts the exact proposed viewport size and redraws on frame/drawable resizing. Workspace content width is explicitly bounded by the window minus the visible sidebar and divider. `connections_list.viewState` exposes read-only local zoom/pan and viewport/visible dimensions; `attached` identifies the active interactive surface. Reusing a native surface clears the previous session binding and textures.
 
 When a narrow window cannot fit every toolbar control, the single toolbar row scrolls horizontally instead of forcing the video canvas beyond its allocated width.
+
+Human navigation creates one ephemeral keyboard-focus request for the selected profile and optional terminal tab. Native surfaces fulfill it after attachment; later renders cannot replay it. Selection changes, another text editor, a sheet or an inactive window cancel pending focus. The local RPC reports the last request result as `keyboardFocus` and the current responder ownership as `viewState.focused`, allowing verification without sending keys.
