@@ -60,15 +60,15 @@ See the [usage guide](docs/usage.md) for grids, reconnect, clipboard, metrics, S
 
 ## Codex and Claude Code
 
-Build the app first, then install either plugin or both through the clients' supported CLI commands:
+Install the app from Releases or build it first, then clone this repository for the plugin marketplace. Install either plugin or both through the clients' supported CLI commands:
 
 ```sh
 bash scripts/install.sh both       # or codex / claude
-open "$HOME/Applications/Desktop Deck.app"
-python3 scripts/check-mcp.py
 ```
 
-The installer copies the app to `~/Applications` and registers the checkout as a local plugin marketplace. Keep the checkout available while using that marketplace. It preserves unrelated client configuration and does not restart chats. Load the plugin in a new chat or through the client's supported reload, then call `connections_list` to verify access.
+Open the installed app, then load the plugin in a new chat or through the client's supported reload and call `connections_list` to verify access. If you built from source, `python3 scripts/check-mcp.py` also checks the bundled server.
+
+The installer registers the checkout as a local plugin marketplace and uses an app already installed in `/Applications` or `~/Applications`; no source build is required for a downloaded app. If a local build exists, it copies that build into `~/Applications`. Keep the checkout available while using the marketplace. It preserves unrelated client configuration and does not restart chats.
 
 Both plugins use the bundled stdio MCP server and the same running app. No network MCP listener is opened. Human input takes priority; screenshots carry generation/geometry guards, and reconnect never replays input. Terminal input acceptance is delivery, not proof of command completion. Read the [plugin control skill](plugins/desktop-deck/skills/control/SKILL.md) before automation.
 

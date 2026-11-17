@@ -3,7 +3,8 @@
 import os, signal, subprocess, time
 from pathlib import Path
 root=Path(__file__).resolve().parents[1]
-approved=[str(root/'dist/Desktop Deck.app/Contents/MacOS/DesktopDeck'),str(Path.home()/'Applications/Desktop Deck.app/Contents/MacOS/DesktopDeck')]
+destinations=[Path.home()/'Applications/Desktop Deck.app',Path('/Applications/Desktop Deck.app'),root/'dist/Desktop Deck.app']
+approved=[str(app/'Contents/MacOS/DesktopDeck') for app in destinations]
 rows=subprocess.check_output(['/bin/ps','-axo','pid=,command='],text=True).splitlines()
 owned=[]
 for row in rows:
@@ -18,6 +19,7 @@ for pid in owned:
         except ProcessLookupError:break
         time.sleep(.1)
     else:raise SystemExit('App did not stop; refusing forced termination')
-installed=Path.home()/'Applications/Desktop Deck.app'
-subprocess.run(['/usr/bin/open',str(installed if installed.exists() else root/'dist/Desktop Deck.app')],check=True)
+installed=next((app for app in destinations if app.exists()),None)
+if installed is None:raise SystemExit('Install or build Desktop Deck first')
+subprocess.run(['/usr/bin/open',str(installed)],check=True)
 print('Restarted Desktop Deck; remote desktops were not stopped')

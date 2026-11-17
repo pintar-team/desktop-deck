@@ -1,1 +1,1 @@
-{"mcpServers":{"desktop-deck":{"type":"stdio","command":"/bin/sh","args":["-c","exec \"$HOME/Applications/Desktop Deck.app/Contents/MacOS/desktop-deck-mcp\""]}}}
+{"mcpServers":{"desktop-deck":{"type":"stdio","command":"/bin/sh","args":["-c","for app in \"$HOME/Applications/Desktop Deck.app\" \"/Applications/Desktop Deck.app\"; do if [ -x \"$app/Contents/MacOS/desktop-deck-mcp\" ]; then exec \"$app/Contents/MacOS/desktop-deck-mcp\"; fi; done; printf \"%s\\n\" \"Install Desktop Deck.app in Applications first.\" >&2; exit 1"]}}}
