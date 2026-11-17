@@ -28,6 +28,8 @@ import DeckCore
     var lease=InputLease()
     var desired=false
     private var reconnect: Task<Void,Never>?
+    private var processActive=false
+    private var stopping=false
     private var retry=0
     private var eventMonitor: Any?
     var tmuxName: String { "deck-"+id.uuidString.lowercased() }
@@ -46,21 +48,35 @@ import DeckCore
         guard profile.usesSSH else { status="SSH is not configured for this profile"; return }
         desired=true; reconnect?.cancel(); generation += 1
         let g=generation; status="Connecting"
+        if processActive {
+            stopping=true;view.terminate()
+            reconnect=Task { [weak self] in
+                try? await Task.sleep(nanoseconds:5_000_000_000)
+                guard let self,!Task.isCancelled,desired,processActive else {return}
+                desired=false;status="SSH is still closing · retry"
+            }
+            return
+        }
         reconnect=Task { [weak self] in
             guard let self else { return }
             do {
+                var useTmux=false
                 if profile.terminalMode != "plain" {
                     let r=try await Commands.ssh(profile,"command -v tmux >/dev/null 2>&1 && printf DECK_TMUX || true")
-                    persistent=r.contains("DECK_TMUX")
+                    useTmux=r.contains("DECK_TMUX")
                 }
-                guard desired,generation==g else { return }
+                guard !Task.isCancelled,desired,generation==g else { return }
+                persistent=useTmux;processActive=true
                 let command=persistent ? "exec tmux -L desktop-deck new-session -A -s \(Shell.quote(tmuxName))" : "exec \"${SHELL:-/bin/sh}\" -l"
                 view.startProcess(executable:"/usr/bin/ssh",args:Shell.sshArguments(profile,interactive:true)+["--",profile.sshHost,command],environment:["TERM=xterm-256color","LANG=en_US.UTF-8","PATH=/usr/bin:/bin:/usr/sbin:/sbin"])
                 status=persistent ? "Connected · persistent" : "Connected · plain SSH"
-            } catch {desired=false;status=error.localizedDescription}
+            } catch {
+                guard !Task.isCancelled,generation==g else {return}
+                desired=false;status=error.localizedDescription
+            }
         }
     }
-    func detach() { desired=false; generation += 1; reconnect?.cancel(); view.terminate(); status="Detached"; lease=InputLease() }
+    func detach() { desired=false; generation += 1; reconnect?.cancel(); stopping=processActive; view.terminate(); status="Detached"; lease=InputLease() }
     func end() async throws {
         detach()
         if persistent { _=try await Commands.ssh(profile,"tmux -L desktop-deck kill-session -t \(Shell.quote(tmuxName))") }
@@ -75,6 +91,12 @@ import DeckCore
     func setTerminalTitle(source: LocalProcessTerminalView,title: String) { self.title=String(title.prefix(80)) }
     func hostCurrentDirectoryUpdate(source: TerminalView,directory: String?) {}
     func processTerminated(source: TerminalView,exitCode: Int32?) {
+        processActive=false
+        if stopping {
+            stopping=false;reconnect?.cancel()
+            if desired {connect()}
+            return
+        }
         lease=InputLease(); generation += 1
         guard desired else { return }
         if !persistent {desired=false}
@@ -84,7 +106,7 @@ import DeckCore
             reconnect=Task { [weak self] in try? await Task.sleep(nanoseconds:UInt64(delay*1e9)); guard let self,!Task.isCancelled,desired else { return }; connect() }
         }
     }
-    func processFailedToStart(source: TerminalView,error: LocalProcessError) {desired=false;status="SSH process could not start"}
+    func processFailedToStart(source: TerminalView,error: LocalProcessError) {processActive=false;stopping=false;desired=false;status="SSH process could not start"}
     deinit { if let eventMonitor { NSEvent.removeMonitor(eventMonitor) } }
 }
 @MainActor final class TerminalContainer: NSView {

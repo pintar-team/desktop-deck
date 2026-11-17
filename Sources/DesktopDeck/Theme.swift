@@ -20,8 +20,31 @@ enum DeckTheme {
     }
 }
 
+@MainActor enum WindowLayout {
+    static func insets(_ window: NSWindow) -> (titlebar: CGFloat,screen: CGFloat) {
+        guard let content=window.contentView,!content.bounds.isEmpty,!window.contentLayoutRect.isEmpty else {return (0,0)}
+        let layout=content.convert(window.contentLayoutRect,from:nil)
+        let titlebar=content.isFlipped ? layout.minY-content.bounds.minY:content.bounds.maxY-layout.maxY
+        let contentTop=window.convertToScreen(content.convert(content.bounds,to:nil)).maxY
+        let screenTop=window.screen.map{$0.frame.maxY-$0.safeAreaInsets.top} ?? contentTop
+        return (max(0,titlebar),max(0,contentTop-screenTop))
+    }
+    static func topInset(_ window: NSWindow) -> CGFloat {
+        guard window.styleMask.contains(.fullScreen) else {return 0}
+        // Full-screen native chrome auto-hides; only the physical screen cutout
+        // needs space here. contentLayoutRect still reserves the hidden title bar.
+        return insets(window).screen
+    }
+    static func info(_ window: NSWindow?) -> [String:Any] {
+        guard let window else {return ["available":false]}
+        let insets=insets(window)
+        return ["available":true,"fullScreen":window.styleMask.contains(.fullScreen),"topInset":topInset(window),"titlebarInset":insets.titlebar,"screenInset":insets.screen,"nativeSafeTop":window.contentView?.safeAreaInsets.top ?? 0]
+    }
+}
+
 struct WindowBackdrop: NSViewRepresentable {
     let hideButtons: Bool
+    let updateLayout: (Bool,CGFloat)->Void
     func makeNSView(context: Context) -> NSView {NSView()}
     func updateNSView(_ view: NSView,context: Context) {
         DispatchQueue.main.async {
@@ -34,6 +57,7 @@ struct WindowBackdrop: NSViewRepresentable {
             if !window.styleMask.contains(.fullSizeContentView) {window.styleMask.insert(.fullSizeContentView)}
             window.backgroundColor=NSColor(red:0.025,green:0.04,blue:0.065,alpha:1)
             for button in [NSWindow.ButtonType.closeButton,.miniaturizeButton,.zoomButton] {window.standardWindowButton(button)?.isHidden=hideButtons}
+            updateLayout(window.styleMask.contains(.fullScreen),WindowLayout.topInset(window))
         }
     }
 }

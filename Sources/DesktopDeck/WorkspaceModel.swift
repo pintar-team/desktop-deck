@@ -153,7 +153,7 @@ import Combine
     @Published var profileDraft: ProfileDraft?
     @Published var keyboardFocusRequest: KeyboardFocusRequest?
     @Published var isFullScreen=false
-    func toggleFullScreen() {NSApplication.shared.keyWindow?.toggleFullScreen(nil)}
+    func toggleFullScreen() {(NSApp.keyWindow ?? NSApp.mainWindow)?.toggleFullScreen(nil)}
     var connectingPermits=0
     var networkAvailable=true
     var server: ControlServer?

@@ -14,6 +14,7 @@ struct WorkspaceView: View {
     @State private var resizingSidebarWidth: Double?
     @State private var revealChrome=false
     @State private var pinnedChrome=false
+    @State private var fullScreenTopInset: CGFloat=0
     @State private var hideTask: Task<Void,Never>?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var toolbarVisible: Bool {chromeMode=="normal" || revealChrome}
@@ -56,9 +57,14 @@ struct WorkspaceView: View {
         .overlay(alignment:.top) {
             if !toolbarVisible {Color.clear.frame(height:5).contentShape(Rectangle()).onHover {if $0 {withAnimation{revealChrome=true}}}.padding(.trailing,70)}
         }
-        .background(WindowBackdrop(hideButtons:chromeMode != "normal"))
+        .padding(.top,model.isFullScreen ? fullScreenTopInset:0)
+        .background(WindowBackdrop(hideButtons:chromeMode != "normal",updateLayout:{fullScreen,inset in
+            if model.isFullScreen != fullScreen {model.isFullScreen=fullScreen}
+            if fullScreenTopInset != inset {fullScreenTopInset=inset}
+        }))
         .tint(activeTint)
-        .ignoresSafeArea(.container,edges:model.isFullScreen ? []:.top).toolbarVisibility(.hidden,for:.windowToolbar)
+        .ignoresSafeArea(.container,edges:.top).toolbarVisibility(.hidden,for:.windowToolbar)
+        .windowToolbarFullScreenVisibility(.onHover)
         .animation(reduceMotion ? nil:.smooth(duration:0.18),value:toolbarVisible)
         .overlay(alignment:.bottom) {if let s=model.focused {FeedbackToast(session:s).padding(.bottom,14)}}
         .onChange(of:chromeMode){_,_ in revealChrome=false;pinnedChrome=false;hideTask?.cancel()}
@@ -84,7 +90,7 @@ struct WorkspaceView: View {
     private var sidebar: some View {
         VStack(spacing:0) {
             TextField("Find connections",text:$model.search).textFieldStyle(.roundedBorder)
-                .padding(.horizontal,8).padding(.top,chromeMode=="normal" ? 34:8).padding(.bottom,5)
+                .padding(.horizontal,8).padding(.top,chromeMode=="normal" && !model.isFullScreen ? 34:8).padding(.bottom,5)
             List {
                 ForEach(model.sidebarSessions) {s in
                     SidebarRow(session:s,selected:model.focused?.id==s.id).contentShape(Rectangle())
@@ -143,7 +149,7 @@ struct WorkspaceView: View {
             if chromeMode != "normal" {Button {revealChrome=false;pinnedChrome=false} label:{Image(systemName:"chevron.up")}.help("Hide toolbar")}
         }.buttonStyle(.borderless).controlSize(.mini).font(.system(size:12))
             .foregroundStyle(activeTint).tint(activeTint)
-            .padding(.leading,chromeMode=="normal" && !sidebarVisible ? 80:5).padding(.trailing,5).frame(height:30).background(DeckTheme.panel)
+            .padding(.leading,chromeMode=="normal" && !sidebarVisible && !model.isFullScreen ? 80:5).padding(.trailing,5).frame(height:30).background(DeckTheme.panel)
             .overlay(alignment:.bottom){activeTint.opacity(0.2).frame(height:1)}
             .onHover {inside in
                 hideTask?.cancel()
