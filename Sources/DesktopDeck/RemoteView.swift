@@ -151,12 +151,10 @@ import DeckCore
         do {
             promisedImage?.cancel();promisedImage=nil
             window?.makeKeyAndOrderFront(nil);NSApp.activate();window?.makeFirstResponder(self)
-            let receivers=sender.draggingPasteboard.readObjects(forClasses:[NSFilePromiseReceiver.self],options:nil) as? [NSFilePromiseReceiver] ?? []
-            if receivers.isEmpty {
+            guard let receiver=try PromisedImageDrop.receiver(from:sender.draggingPasteboard) else {
                 guard let data=try ImageClipboard.read(sender.draggingPasteboard) else {session.showFeedback("Drop an image file");return false}
                 session.pasteImage(data);return true
             }
-            guard receivers.count==1,let receiver=receivers.first else {session.showFeedback("Drop one image file");return false}
             session.humanInput();let revision=session.connectionRevision,geometry=session.geometry,human=session.humanActionRevision
             promisedImage=try PromisedImageDrop(receiver) {[weak self,weak session] data,error in
                 guard let self,let session else {return};self.promisedImage=nil

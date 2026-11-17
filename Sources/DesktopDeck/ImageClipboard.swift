@@ -80,24 +80,34 @@ enum ImageClipboard {
 }
 
 @MainActor final class PromisedImageDrop {
+    static func receiver(from board: NSPasteboard) throws -> NSFilePromiseReceiver? {
+        let receivers=board.readObjects(forClasses:[NSFilePromiseReceiver.self],options:nil) as? [NSFilePromiseReceiver] ?? []
+        guard receivers.count<=1 else {throw DeckError("Drop one image at a time")}
+        return receivers.first
+    }
     private let directory=FileManager.default.temporaryDirectory.appendingPathComponent("desktop-deck-drop-"+UUID().uuidString,isDirectory:true)
     private let receiver: NSFilePromiseReceiver
+    private let queue=OperationQueue()
     private var completion: ((Data?,String?)->Void)?
     private var deadline: Task<Void,Never>?
     init(_ receiver: NSFilePromiseReceiver,completion: @escaping (Data?,String?)->Void) throws {
-        guard receiver.fileNames.count==1 else {throw DeckError("Drop one image at a time")}
         self.receiver=receiver;self.completion=completion
         try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:false,attributes:[.posixPermissions:0o700])
-        receiver.receivePromisedFiles(atDestination:directory,options:[:],operationQueue:.main) {[weak self] file,error in
+        queue.maxConcurrentOperationCount=1;queue.qualityOfService = .userInitiated
+        let destination=directory
+        receiver.receivePromisedFiles(atDestination:directory,options:[:],operationQueue:queue) {[weak self,receiver] file,error in
+            // Names are unavailable before receiving. Read within AppKit's file-coordination scope.
+            let result: Result<Data,Error>
+            do {
+                if let error {throw error}
+                guard receiver.fileNames.count<=1 else {throw DeckError("Drop one image at a time")}
+                guard file.resolvingSymlinksInPath().deletingLastPathComponent()==destination.resolvingSymlinksInPath() else {throw DeckError("Invalid promised image location")}
+                result = .success(try ImageClipboard.readFile(file))
+            } catch {result = .failure(error)}
             Task {@MainActor in
                 guard let self else {return}
                 guard self.completion != nil else {try? FileManager.default.removeItem(at:self.directory);return}
-                do {
-                    if let error {throw error}
-                    guard file.resolvingSymlinksInPath().deletingLastPathComponent()==self.directory.resolvingSymlinksInPath() else {throw DeckError("Invalid promised image location")}
-                    self.finish(try ImageClipboard.readFile(file),error:nil)
-                }
-                catch {self.finish(nil,error:error.localizedDescription)}
+                switch result {case .success(let data):self.finish(data,error:nil);case .failure(let error):self.finish(nil,error:error.localizedDescription)}
             }
         }
         deadline=Task {[weak self] in
@@ -106,11 +116,11 @@ enum ImageClipboard {
         }
     }
     private func finish(_ data: Data?,error: String?) {
-        let callback=completion;completion=nil;deadline?.cancel()
+        let callback=completion;completion=nil;deadline?.cancel();queue.cancelAllOperations()
         try? FileManager.default.removeItem(at:directory);callback?(data,error)
     }
-    func cancel() {completion=nil;deadline?.cancel();try? FileManager.default.removeItem(at:directory)}
-    deinit {deadline?.cancel();try? FileManager.default.removeItem(at:directory)}
+    func cancel() {completion=nil;deadline?.cancel();queue.cancelAllOperations();try? FileManager.default.removeItem(at:directory)}
+    deinit {deadline?.cancel();queue.cancelAllOperations();try? FileManager.default.removeItem(at:directory)}
 }
 
 actor ImageEncoder {
