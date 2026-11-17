@@ -55,7 +55,7 @@ struct DesktopTile: View {
                 if !session.isOnline {Text(session.connectionSummary).font(.system(size:10)).foregroundStyle(.white.opacity(0.8))}
             }.lineLimit(1).padding(5).shadow(color:.black,radius:2,x:0,y:1)
                 .onDrag{NSItemProvider(object:session.id.uuidString as NSString)}
-        }.contentShape(Rectangle()).onTapGesture {model.updateWorkspace{$0.focused=session.id};model.setViewMode(session.profile.hasVNC ? .desktop:.terminal)}
+        }.contentShape(Rectangle()).onTapGesture {model.updateWorkspace{$0.focused=session.id};model.setViewMode(session.profile.hasVNC ? .desktop:.terminal,focusKeyboard:true)}
             .overlay(alignment:.bottomLeading){HostMetricsReadout(session:session).padding(5).allowsHitTesting(false)}
             .overlay(Rectangle().strokeBorder(session.tint.opacity(model.focused?.id==session.id || dropTarget ? 1:0.45),lineWidth:model.focused?.id==session.id || dropTarget ? 2:1))
             .onGeometryChange(for:CGFloat.self){$0.size.width} action:{tileWidth=$0}
@@ -71,7 +71,7 @@ struct DesktopPanel: View {
         VStack(spacing:0) {
             if model.viewMode.showsDesktop {
                 ZStack {
-                    Color.black;RemoteSurface(session:session,interactive:true)
+                    Color.black;RemoteSurface(session:session,interactive:true,focusRequest:model.keyboardFocus(for:session.id))
                     if !session.active {
                         if session.frame==nil {
                             VStack(spacing:10) {
@@ -116,12 +116,12 @@ struct TerminalPanel: View {
             }.onEnded{_ in dragOrigin=nil})}
             HStack(spacing:4) {
                 ScrollView(.horizontal,showsIndicators:false){HStack(spacing:2){ForEach(session.terminals){tab in
-                    TerminalTabButton(tab:tab,selected:session.selectedTerminal==tab.id,tint:session.tint,previousEndpoint:!tab.profile.hasSameTerminalConnection(as:session.profile)){session.selectedTerminal=tab.id}
+                    TerminalTabButton(tab:tab,selected:session.selectedTerminal==tab.id,tint:session.tint,previousEndpoint:!tab.profile.hasSameTerminalConnection(as:session.profile)){session.selectedTerminal=tab.id;model.requestKeyboardFocus(terminal:true)}
                 }}}
                 Button{_=model.openTerminal(session)}label:{Image(systemName:"plus")}.help("New terminal tab")
                 if let tab=selected {TerminalActions(tab:tab)}
             }.buttonStyle(.borderless).controlSize(.mini).padding(.horizontal,5).frame(height:24).background(DeckTheme.panel)
-            if let tab=selected {TerminalSurface(tab:tab).frame(height:fullHeight ? nil:session.terminalHeight).frame(maxHeight:fullHeight ? .infinity:nil)}
+            if let tab=selected {TerminalSurface(tab:tab,focusRequest:model.keyboardFocus(for:session.id,terminal:tab.id)).frame(height:fullHeight ? nil:session.terminalHeight).frame(maxHeight:fullHeight ? .infinity:nil)}
             else {
                 VStack(spacing:10) {
                     Image(systemName:"terminal").font(.system(size:28,weight:.light)).foregroundStyle(session.tint.opacity(0.6))

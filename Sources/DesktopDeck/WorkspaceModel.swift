@@ -151,6 +151,7 @@ import Combine
     @Published var error=""
     @Published var search=""
     @Published var profileDraft: ProfileDraft?
+    @Published var keyboardFocusRequest: KeyboardFocusRequest?
     @Published var isFullScreen=false
     func toggleFullScreen() {NSApplication.shared.keyWindow?.toggleFullScreen(nil)}
     var connectingPermits=0
@@ -193,12 +194,30 @@ import Combine
         let mode=ViewMode(rawValue:s.surfaceMode) ?? .desktop
         return s.profile.supports(mode) ? mode:(s.profile.hasVNC ? .desktop:.terminal)
     }
-    func setViewMode(_ mode: ViewMode) {
-        if mode == .overview {updateWorkspace{$0.focusMode=false};return}
+    func setViewMode(_ mode: ViewMode,focusKeyboard: Bool=false) {
+        if mode == .overview {keyboardFocusRequest=nil;updateWorkspace{$0.focusMode=false};return}
         guard let s=focused,s.profile.supports(mode) else {return}
         if mode.showsTerminal && s.terminals.isEmpty {_=openTerminal(s,present:false)}
         s.releaseInput();s.surfaceMode=mode.rawValue
         updateWorkspace{$0.focusMode=true;$0.focused=s.id}
+        if focusKeyboard {requestKeyboardFocus()}
+    }
+    func requestKeyboardFocus(terminal: Bool=false) {
+        guard let s=focused,viewMode != .overview else {keyboardFocusRequest=nil;return}
+        let terminalID: UUID?
+        if terminal || !viewMode.showsDesktop {
+            guard viewMode.showsTerminal,let tab=s.selectedTab else {keyboardFocusRequest=nil;return}
+            terminalID=tab.id;tab.lease.human()
+        } else {terminalID=nil;s.humanInput()}
+        let id=UUID(),profile=s.id
+        keyboardFocusRequest=KeyboardFocusRequest(id:id,profile:profile,terminal:terminalID,window:NSApp.keyWindow) {[weak self] in
+            guard let self,self.keyboardFocusRequest?.id==id,self.focused?.id==profile else {return false}
+            return terminalID.map{self.viewMode.showsTerminal && self.focused?.selectedTerminal==$0} ?? self.viewMode.showsDesktop
+        }
+    }
+    func keyboardFocus(for profile: UUID,terminal: UUID?=nil) -> KeyboardFocusRequest? {
+        guard let request=keyboardFocusRequest,request.profile==profile,request.terminal==terminal else {return nil}
+        return request
     }
     func updateWorkspace(_ edit: (inout WorkspacePreset)->Void) {edit(&saved.workspaces[workspaceIndex]);saved.workspaces[workspaceIndex].normalize();updateRenderingRates();persist()}
     func updateRenderingRates() {
@@ -282,11 +301,12 @@ import Combine
         guard let created=try RemoteSession.parse(output).first else { throw DeckError("No new session returned") }
         selectSession(s,display:created.display);await refreshSessions(s)
     }
-    func openTerminal(_ s: DesktopSession,present: Bool=true) -> TerminalTab {
+    func openTerminal(_ s: DesktopSession,present: Bool=true,focusKeyboard: Bool=true) -> TerminalTab {
         let tab=makeTerminal(s);s.terminals.append(tab);s.selectedTerminal=tab.id;tab.connect()
         if present {
             s.surfaceMode=s.surfaceMode=="split" ? "split":"terminal"
             updateWorkspace {if !$0.profiles.contains(s.id) {$0.profiles.append(s.id)};$0.focused=s.id;$0.focusMode=true}
+            if focusKeyboard {requestKeyboardFocus(terminal:true)}
         }
         updateRenderingRates();persist();return tab
     }

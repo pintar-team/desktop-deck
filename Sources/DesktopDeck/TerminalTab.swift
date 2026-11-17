@@ -89,6 +89,7 @@ import DeckCore
 }
 @MainActor final class TerminalContainer: NSView {
     private(set) var terminal: DeckTerminalView?
+    var focusRequest: KeyboardFocusRequest?
     init(_ terminal: DeckTerminalView) {
         super.init(frame:.zero)
         wantsLayer=true;layer?.masksToBounds=true
@@ -102,15 +103,14 @@ import DeckCore
         if restoreFocus {window?.makeFirstResponder(next)}
     }
     private var ownsFirstResponder: Bool {
-        guard let terminal,terminal.superview===self,let first=window?.firstResponder as? NSView else {return false}
-        return first===terminal || first.isDescendant(of:terminal)
+        terminal?.superview===self && terminal?.ownsKeyboardFocus==true
     }
     func unbind() {
         if let terminal,terminal.superview===self {
             if ownsFirstResponder {window?.makeFirstResponder(nil)}
             terminal.removeFromSuperview()
         }
-        terminal=nil
+        terminal=nil;focusRequest=nil
     }
     private func fitTerminal() {
         guard let terminal,terminal.superview===self else {return}
@@ -118,14 +118,17 @@ import DeckCore
         // SwiftTerm resizes its terminal model and PTY in setFrameSize.
         // Assigning the frame rectangle can bypass that AppKit override.
         if bounds.width>0 && bounds.height>0 {terminal.setFrameSize(bounds.size)}
+        focusRequest?.schedule(on:terminal)
     }
     override func setFrameSize(_ size: NSSize) {super.setFrameSize(size);fitTerminal()}
     override func layout() {super.layout();fitTerminal()}
+    override func viewDidMoveToWindow() {super.viewDidMoveToWindow();fitTerminal()}
 }
 struct TerminalSurface: NSViewRepresentable {
     let tab: TerminalTab
+    var focusRequest: KeyboardFocusRequest?=nil
     func makeNSView(context: Context) -> TerminalContainer {TerminalContainer(tab.view)}
-    func updateNSView(_ nsView: TerminalContainer,context: Context) {nsView.bind(tab.view)}
+    func updateNSView(_ nsView: TerminalContainer,context: Context) {nsView.bind(tab.view);nsView.focusRequest=focusRequest;focusRequest?.schedule(on:tab.view)}
     static func dismantleNSView(_ nsView: TerminalContainer,coordinator: ()) {nsView.unbind()}
     func sizeThatFits(_ proposal: ProposedViewSize,nsView: TerminalContainer,context: Context) -> CGSize? {
         CGSize(width:proposal.width ?? 800,height:proposal.height ?? 400)

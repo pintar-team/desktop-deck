@@ -10,10 +10,12 @@ import DeckCore
                 promisedImage?.cancel();promisedImage=nil
                 texture=nil;previousTexture=nil;sequence = -1;connectionRevision = -1
                 blendTimer?.invalidate();blendTimer=nil;setNeedsDisplay(bounds)
+                modifiers=[]
             }
         }
     }
     var interactive=false
+    var focusRequest: KeyboardFocusRequest?
     var smoothPreview=true
     private var pipeline: MTLRenderPipelineState?
     private var commands: MTLCommandQueue?
@@ -59,7 +61,7 @@ import DeckCore
     }
     required init(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
     override func setFrameSize(_ newSize: NSSize) {super.setFrameSize(newSize);viewportChanged()}
-    private func viewportChanged() {if interactive {session?.viewport=bounds.size};setNeedsDisplay(bounds)}
+    private func viewportChanged() {if interactive {session?.viewport=bounds.size;focusRequest?.schedule(on:self)};setNeedsDisplay(bounds)}
     func mtkView(_ view: MTKView,drawableSizeWillChange size: CGSize) {viewportChanged()}
     var transform: ViewTransform {
         ViewTransform(width:Double(bounds.width),height:Double(bounds.height),frameWidth:Double(session?.frame?.width ?? 1),frameHeight:Double(session?.frame?.height ?? 1),zoom:interactive ? session?.zoom ?? 1:1,panX:interactive ? Double(session?.pan.x ?? 0):0,panY:interactive ? Double(session?.pan.y ?? 0):0)
@@ -139,6 +141,7 @@ import DeckCore
         if newWindow==nil {promisedImage?.cancel();promisedImage=nil}
         super.viewWillMove(toWindow:newWindow)
     }
+    override func viewDidMoveToWindow() {super.viewDidMoveToWindow();if interactive {focusRequest?.schedule(on:self)}}
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         guard interactive,session?.active==true else {return []}
         return sender.draggingPasteboard.availableType(from:[.fileURL,.png,.tiff]) != nil || sender.draggingPasteboard.canReadObject(forClasses:[NSFilePromiseReceiver.self],options:nil) ? .copy:[]
@@ -192,6 +195,7 @@ import DeckCore
 struct RemoteSurface: NSViewRepresentable {
     @ObservedObject var session: DesktopSession
     let interactive: Bool
+    var focusRequest: KeyboardFocusRequest?=nil
     @AppStorage("previewSmoothing") private var smoothing=true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     func makeNSView(context: Context) -> RemoteMetalView { let view=RemoteMetalView(); view.session=session; return view }
@@ -202,19 +206,21 @@ struct RemoteSurface: NSViewRepresentable {
     func updateNSView(_ view: RemoteMetalView,context: Context) {
         if view.session?.id != session.id,let previous=view.session,previous.inputView === view {previous.releaseInput();previous.inputView=nil}
         view.session=session;view.interactive=interactive
+        view.focusRequest=interactive ? focusRequest:nil
         if interactive {session.inputView=view;session.viewport=view.bounds.size}
         else if session.inputView === view {session.inputView=nil}
         view.smoothPreview=smoothing && !reduceMotion;view.setNeedsDisplay(view.bounds)
+        view.focusRequest?.schedule(on:view)
     }
     static func dismantleNSView(_ view: RemoteMetalView,coordinator: ()) {
         if let previous=view.session,previous.inputView === view {previous.releaseInput();previous.inputView=nil}
-        view.session=nil
+        view.focusRequest=nil;view.session=nil
     }
 }
 @MainActor extension DesktopSession {
     var viewState: [String:Any] {
         let view=inputView.flatMap{$0.session?.id==id && $0.interactive && $0.window != nil ? $0:nil}
         let size=view?.bounds.size ?? viewport,visible=view.map{$0.bounds.intersection($0.visibleRect).size} ?? size
-        return ["attached":view != nil,"viewportWidth":size.width,"viewportHeight":size.height,"visibleWidth":visible.width,"visibleHeight":visible.height,"zoom":zoom,"panX":pan.x,"panY":pan.y]
+        return ["attached":view != nil,"focused":view?.ownsKeyboardFocus ?? false,"viewportWidth":size.width,"viewportHeight":size.height,"visibleWidth":visible.width,"visibleHeight":visible.height,"zoom":zoom,"panX":pan.x,"panY":pan.y]
     }
 }

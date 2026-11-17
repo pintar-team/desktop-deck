@@ -23,9 +23,9 @@ import DeckCore
                 Button("Disconnect workspace") { model.visible.forEach{model.disconnect($0)} }
                 Button("Full screen"){model.toggleFullScreen()}.keyboardShortcut("f",modifiers:[.control,.command])
                 Divider()
-                Button("Overview / Focus") {model.setViewMode(model.viewMode == .overview ? ViewMode(rawValue:model.focused?.surfaceMode ?? "desktop") ?? .desktop:.overview)}.keyboardShortcut("g",modifiers:[.command,.shift])
+                Button("Overview / Focus") {model.setViewMode(model.viewMode == .overview ? ViewMode(rawValue:model.focused?.surfaceMode ?? "desktop") ?? .desktop:.overview,focusKeyboard:true)}.keyboardShortcut("g",modifiers:[.command,.shift])
                 Button("Desktop / Terminal") {
-                    model.setViewMode(model.viewMode == .terminal ? .desktop:.terminal)
+                    model.setViewMode(model.viewMode == .terminal ? .desktop:.terminal,focusKeyboard:true)
                 }.keyboardShortcut("t",modifiers:[.command,.shift])
                 Button("Auto-hide / Show interface") {
                     let mode=UserDefaults.standard.string(forKey:"chromeMode") ?? "normal"

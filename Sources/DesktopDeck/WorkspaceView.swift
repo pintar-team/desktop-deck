@@ -91,6 +91,7 @@ struct WorkspaceView: View {
                         .onTapGesture {
                             model.updateWorkspace{if !$0.profiles.contains(s.id){$0.profiles.append(s.id)};$0.focused=s.id}
                             if model.workspace.focusMode && !s.profile.hasVNC {model.setViewMode(.terminal)}
+                            model.requestKeyboardFocus()
                         }
                         .contextMenu {
                             ConnectionActions(session:s,model:model)
@@ -110,13 +111,13 @@ struct WorkspaceView: View {
             Button {sidebarVisible.toggle()} label:{Image(systemName:"sidebar.left")}.help("Connections sidebar")
             if model.saved.workspaces.count>1 {
                 ScrollView(.horizontal,showsIndicators:false){HStack(spacing:2){ForEach(model.saved.workspaces){p in
-                    Button {model.saved.selectedWorkspace=p.id;model.updateRenderingRates();model.persist()} label:{
+                    Button {model.saved.selectedWorkspace=p.id;model.updateRenderingRates();model.persist();model.requestKeyboardFocus()} label:{
                         Text(p.name).font(.system(size:11,weight:.medium)).lineLimit(1).padding(.horizontal,6).frame(height:22)
                             .background(p.id==model.saved.selectedWorkspace ? activeTint.opacity(0.16):.clear,in:RoundedRectangle(cornerRadius:3))
                     }.buttonStyle(.plain)
                 }}}.frame(maxWidth:220)
             }
-            ModeButtons(mode:model.viewMode,supportsSSH:model.focused?.profile.usesSSH ?? false,supportsVNC:model.focused?.profile.hasVNC ?? false,tint:model.focused?.tint ?? DeckTheme.accent,select:model.setViewMode)
+            ModeButtons(mode:model.viewMode,supportsSSH:model.focused?.profile.usesSSH ?? false,supportsVNC:model.focused?.profile.hasVNC ?? false,tint:model.focused?.tint ?? DeckTheme.accent,select:{model.setViewMode($0,focusKeyboard:true)})
             if model.viewMode == .overview {
                 Picker("Grid columns",selection:Binding(get:{model.workspace.gridMode ?? 0},set:{v in model.updateWorkspace{$0.gridMode=v}})) {
                     Text("Fit all").tag(0);ForEach([2,3,4,5],id:\.self){Text("\($0) × N").tag($0)}
