@@ -68,6 +68,7 @@ struct ProfileEditor: View {
             if !error.isEmpty {Text(error).foregroundStyle(.orange).font(.caption)}
             HStack {Spacer();Button("Cancel"){dismiss()}.keyboardShortcut(.cancelAction);Button("Save",action:save).buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(!profile.usesSSH && !profile.hasVNC)}
         }.textFieldStyle(.roundedBorder).controlSize(.small).padding(20).frame(width:440).background(DeckTheme.panel).tint(tint)
+            .onChange(of:profile.sshServerAddress){_,_ in profile.hostKeyAlias=""}
     }
     private func section<Content: View>(_ title: String,icon: String,active: Bool,@ViewBuilder content: ()->Content) -> some View {
         VStack(alignment:.leading,spacing:8) {

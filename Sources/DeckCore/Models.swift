@@ -37,6 +37,25 @@ public struct Profile: Codable, Identifiable, Equatable {
         return directory.isEmpty ? Self.defaultTurboVNCDirectory:directory
     }
     public var hasVNC: Bool {!host.isEmpty || sessionManager}
+    public func duplicated() -> Profile {
+        var copy=self;copy.id=UUID();copy.name += " copy";copy.autoConnect=false;copy.tintHex=nil;copy.autoTintHex=nil
+        return copy
+    }
+    public var sshServerAddress: [String] {[sshHost,String(sshPort)]}
+    public mutating func clearInheritedHostKeyAlias(from previous: Profile,explicitlySet: Bool=false) {
+        if !explicitlySet,sshServerAddress != previous.sshServerAddress,hostKeyAlias==previous.hostKeyAlias {hostKeyAlias=""}
+    }
+    public func hasSameSSHConnection(as other: Profile) -> Bool {
+        guard usesSSH==other.usesSSH else {return false}
+        return !usesSSH || (sshServerAddress==other.sshServerAddress && sshUser==other.sshUser && hostKeyAlias==other.hostKeyAlias)
+    }
+    public func hasSameTerminalConnection(as other: Profile) -> Bool {hasSameSSHConnection(as:other) && terminalMode==other.terminalMode}
+    public func hasSameVNCConnection(as other: Profile) -> Bool {
+        guard hasVNC==other.hasVNC else {return false}
+        guard hasVNC else {return true}
+        return host==other.host && port==other.port && sessionManager==other.sessionManager && hasSameSSHConnection(as:other)
+            && (!sessionManager || (display==other.display && turboVNCDirectory==other.turboVNCDirectory))
+    }
     public func supports(_ mode: ViewMode) -> Bool {
         (!mode.showsDesktop || hasVNC) && (!mode.showsTerminal || usesSSH)
     }

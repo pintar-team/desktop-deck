@@ -2,6 +2,34 @@ import XCTest
 @testable import DeckCore
 
 final class CoreTests: XCTestCase {
+    func testDuplicateKeepsServerVerificationButGetsIndependentIdentity() {
+        var source=Profile(host:"localhost",sshHost:"localhost",hostKeyAlias:"localhost")
+        source.autoConnect=true;source.tintHex="7AC8FF";source.autoTintHex="FF7700"
+        let copy=source.duplicated()
+        XCTAssertNotEqual(copy.id,source.id);XCTAssertTrue(copy.hasSameSSHConnection(as:source))
+        XCTAssertFalse(copy.autoConnect);XCTAssertNil(copy.tintHex);XCTAssertNil(copy.autoTintHex)
+    }
+    func testChangedSSHServerDropsOnlyAnInheritedHostKeyAlias() {
+        let source=Profile(sshHost:"localhost",hostKeyAlias:"localhost")
+        var host=source;host.sshHost="127.0.0.1";host.clearInheritedHostKeyAlias(from:source)
+        XCTAssertTrue(host.hostKeyAlias.isEmpty)
+        var port=source;port.sshPort=2222;port.clearInheritedHostKeyAlias(from:source)
+        XCTAssertTrue(port.hostKeyAlias.isEmpty)
+        var user=source;user.sshUser="user";user.clearInheritedHostKeyAlias(from:source)
+        XCTAssertEqual(user.hostKeyAlias,source.hostKeyAlias)
+        var explicit=source;explicit.sshHost="127.0.0.1";explicit.clearInheritedHostKeyAlias(from:source,explicitlySet:true)
+        XCTAssertEqual(explicit.hostKeyAlias,source.hostKeyAlias)
+    }
+    func testPresentationAndAutoConnectEditsPreserveTransportIdentity() {
+        let source=Profile(host:"localhost",sshHost:"localhost")
+        var edited=source;edited.name="Renamed";edited.group="Group";edited.autoConnect=true;edited.tintHex="7AC8FF";edited.surfaceMode="terminal";edited.quality="text"
+        XCTAssertTrue(edited.hasSameSSHConnection(as:source));XCTAssertTrue(edited.hasSameVNCConnection(as:source))
+        edited.sshPort=2222
+        XCTAssertFalse(edited.hasSameSSHConnection(as:source));XCTAssertFalse(edited.hasSameVNCConnection(as:source))
+        var screen=source;screen.sessionManager=true;screen.display=":1"
+        var next=screen;next.display=":2"
+        XCTAssertFalse(next.hasSameVNCConnection(as:screen));XCTAssertTrue(next.hasSameSSHConnection(as:screen))
+    }
     func testArchiveRoundtripAndInvalidReferences() throws {
         let a=Profile(host:"localhost"),b=Profile(host:"",sshHost:"localhost")
         var w=WorkspacePreset(name:"Test",profiles:[b.id,a.id]);w.focused=b.id;w.gridMode=3

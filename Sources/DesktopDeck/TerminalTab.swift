@@ -88,14 +88,32 @@ import DeckCore
     deinit { if let eventMonitor { NSEvent.removeMonitor(eventMonitor) } }
 }
 @MainActor final class TerminalContainer: NSView {
-    let terminal: DeckTerminalView
+    private(set) var terminal: DeckTerminalView?
     init(_ terminal: DeckTerminalView) {
-        self.terminal=terminal;super.init(frame:.zero)
+        super.init(frame:.zero)
         wantsLayer=true;layer?.masksToBounds=true
-        addSubview(terminal)
+        bind(terminal)
     }
     required init?(coder: NSCoder) {fatalError("init(coder:) unavailable")}
+    func bind(_ next: DeckTerminalView) {
+        guard terminal !== next else {fitTerminal();return}
+        let restoreFocus=ownsFirstResponder
+        unbind();terminal=next;addSubview(next);fitTerminal()
+        if restoreFocus {window?.makeFirstResponder(next)}
+    }
+    private var ownsFirstResponder: Bool {
+        guard let terminal,terminal.superview===self,let first=window?.firstResponder as? NSView else {return false}
+        return first===terminal || first.isDescendant(of:terminal)
+    }
+    func unbind() {
+        if let terminal,terminal.superview===self {
+            if ownsFirstResponder {window?.makeFirstResponder(nil)}
+            terminal.removeFromSuperview()
+        }
+        terminal=nil
+    }
     private func fitTerminal() {
+        guard let terminal,terminal.superview===self else {return}
         terminal.setFrameOrigin(.zero)
         // SwiftTerm resizes its terminal model and PTY in setFrameSize.
         // Assigning the frame rectangle can bypass that AppKit override.
@@ -107,7 +125,8 @@ import DeckCore
 struct TerminalSurface: NSViewRepresentable {
     let tab: TerminalTab
     func makeNSView(context: Context) -> TerminalContainer {TerminalContainer(tab.view)}
-    func updateNSView(_ nsView: TerminalContainer,context: Context) {nsView.needsLayout=true}
+    func updateNSView(_ nsView: TerminalContainer,context: Context) {nsView.bind(tab.view)}
+    static func dismantleNSView(_ nsView: TerminalContainer,coordinator: ()) {nsView.unbind()}
     func sizeThatFits(_ proposal: ProposedViewSize,nsView: TerminalContainer,context: Context) -> CGSize? {
         CGSize(width:proposal.width ?? 800,height:proposal.height ?? 400)
     }

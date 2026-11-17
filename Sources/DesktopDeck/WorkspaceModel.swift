@@ -222,7 +222,8 @@ import Combine
         do { server=try ControlServer(model:self) } catch { self.error=error.localizedDescription }
         for record in terminalRecords {
             if let s=sessions.first(where:{$0.id==record.profile}) {
-                let tab=makeTerminal(s,id:record.id,profile:record.profileSnapshot); s.terminals.append(tab); s.selectedTerminal=tab.id
+                let tab=makeTerminal(s,id:record.id,profile:record.profileSnapshot);s.terminals.append(tab)
+                if tab.profile.hasSameTerminalConnection(as:s.profile) {s.selectedTerminal=tab.id}
                 if record.reconnect { tab.connect() }
             }
         }
@@ -241,16 +242,29 @@ import Combine
                 self.hostMonitor.tick(self.sessions,enabled:UserDefaults.standard.object(forKey:"showHostMetrics") as? Bool ?? true)
             }
         }
-        for session in sessions where session.profile.autoConnect { connect(session) }
+        for session in sessions where session.profile.autoConnect && !session.wantsConnection { connect(session) }
     }
     func add(_ profile: Profile,password: String?) throws {
         try profile.validate()
         if let password { try Secrets.set(password,profile:profile) }
-        if let session=sessions.first(where:{$0.id==profile.id}) {
-            disconnect(session);session.profile=profile;session.frame=nil;session.geometry += 1;session.previousDisplay=nil;session.hostMetrics=nil;session.hostMetricsError=""
+        let existing=sessions.first{$0.id==profile.id}
+        let enableAutoConnect=profile.autoConnect && existing?.profile.autoConnect != true
+        if let session=existing {
+            let previous=session.profile
+            let vncChanged = !profile.hasSameVNCConnection(as:previous) || (profile.hasVNC && password != nil)
+            if vncChanged {
+                // Disconnect only the VNC transport here; terminal ownership is independent.
+                if previous.hasVNC {disconnect(session)}
+                session.frame=nil;session.geometry += 1;session.previousDisplay=nil;session.remoteSessions=[]
+            }
+            if !profile.hasSameTerminalConnection(as:previous) {session.selectedTerminal=session.terminals.last{$0.profile.hasSameTerminalConnection(as:profile)}?.id}
+            session.profile=profile
+            if !profile.hasSameSSHConnection(as:previous) {session.hostMetrics=nil;session.hostMetricsError=""}
+            if profile.quality != previous.quality {session.quality()}
         }
         else { let s=DesktopSession(profile); sessions.append(s);assignColor(s);observe(s); saved.workspaces[workspaceIndex].profiles.append(profile.id) }
         persist()
+        if enableAutoConnect,let session=sessions.first(where:{$0.id==profile.id}),!session.isOnline,!session.wantsConnection {connect(session)}
     }
     func delete(_ session: DesktopSession) {
         disconnect(session); session.terminals.forEach{$0.detach()}
@@ -284,8 +298,7 @@ import Combine
     }
     func editProfile(_ s: DesktopSession?=nil) {profileDraft=ProfileDraft(profile:s?.profile ?? Profile())}
     func duplicateProfile(_ s: DesktopSession) {
-        var copy=s.profile;copy.id=UUID();copy.name += " copy";copy.autoConnect=false;copy.tintHex=nil;copy.autoTintHex=nil
-        profileDraft=ProfileDraft(profile:copy,duplicateSource:s.id)
+        profileDraft=ProfileDraft(profile:s.profile.duplicated(),duplicateSource:s.id)
     }
     var sidebarSessions: [DesktopSession] {
         let order=workspace.profiles+sessions.map(\.id).filter{!workspace.profiles.contains($0)}

@@ -116,7 +116,7 @@ struct TerminalPanel: View {
             }.onEnded{_ in dragOrigin=nil})}
             HStack(spacing:4) {
                 ScrollView(.horizontal,showsIndicators:false){HStack(spacing:2){ForEach(session.terminals){tab in
-                    TerminalTabButton(tab:tab,selected:session.selectedTerminal==tab.id,tint:session.tint){session.selectedTerminal=tab.id}
+                    TerminalTabButton(tab:tab,selected:session.selectedTerminal==tab.id,tint:session.tint,previousEndpoint:!tab.profile.hasSameTerminalConnection(as:session.profile)){session.selectedTerminal=tab.id}
                 }}}
                 Button{_=model.openTerminal(session)}label:{Image(systemName:"plus")}.help("New terminal tab")
                 if let tab=selected {TerminalActions(tab:tab)}
@@ -136,12 +136,14 @@ struct TerminalTabButton: View {
     @ObservedObject var tab: TerminalTab
     let selected: Bool
     let tint: Color
+    var previousEndpoint=false
     let select: ()->Void
     var body: some View {
         Button(action:select){
             HStack(spacing:4){
                 Circle().fill(tab.status.hasPrefix("Connected") ? tint:.orange).frame(width:4,height:4)
                 Text(tab.title).font(.system(size:11,weight:selected ? .semibold:.regular)).lineLimit(1)
+                if previousEndpoint {Text((tab.profile.sshUser.isEmpty ? "":tab.profile.sshUser+"@")+tab.profile.sshHost).font(.system(size:10)).foregroundStyle(.secondary).lineLimit(1)}
             }.padding(.horizontal,5).frame(height:22).foregroundStyle(selected ? tint:.primary)
                 .overlay(alignment:.bottom){Rectangle().fill(selected ? tint:.clear).frame(height:1)}
         }.buttonStyle(.plain).help(tab.status)

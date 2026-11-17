@@ -29,7 +29,7 @@ import DeckCore
     }
     func connect(_ s: DesktopSession) {
         if !s.profile.hasVNC {
-            if let tab=s.selectedTab {tab.detach();tab.connect()}
+            if let tab=s.selectedTab,tab.profile.hasSameTerminalConnection(as:s.profile) {tab.detach();tab.connect()}
             else {_=openTerminal(s,present:false)}
             return
         }

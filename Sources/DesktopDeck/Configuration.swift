@@ -55,8 +55,9 @@ import DeckCore
         if action=="add" {profile=Profile()}
         else {
             guard let existing else {throw DeckError("Unknown profile ID")};profile=existing.profile
-            if action=="duplicate" {profile.id=UUID();profile.name += " copy";profile.autoConnect=false;profile.tintHex=nil;profile.autoTintHex=nil}
+            if action=="duplicate" {profile=profile.duplicated()}
         }
+        let previous=profile
         var data=try object(profile)
         let allowed=Set(["name","group","host","port","sshHost","sshUser","sshPort","hostKeyAlias","sessionManager","display","autoConnect","terminalMode","quality","serverDirectory","surfaceMode","tintHex"])
         if let patch=arguments["configuration"] as? [String:Any] {
@@ -64,6 +65,7 @@ import DeckCore
             for (key,value) in patch {data[key]=value}
         }
         profile=try JSONDecoder().decode(Profile.self,from:JSONSerialization.data(withJSONObject:data))
+        profile.clearInheritedHostKeyAlias(from:previous,explicitlySet:(arguments["configuration"] as? [String:Any])?["hostKeyAlias"] != nil)
         if profile.name.isEmpty || profile.name=="New connection" {profile.name=profile.usesSSH ? profile.sshHost:profile.host}
         if !profile.hasVNC {profile.surfaceMode="terminal"}
         let password=arguments["password"] as? String
