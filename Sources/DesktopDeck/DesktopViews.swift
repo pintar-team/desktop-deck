@@ -44,6 +44,11 @@ struct DesktopTile: View {
                     if session.needsAction || !session.desired {Button(session.needsAction ? "Try again":"Connect"){model.connect(session)}.buttonStyle(.bordered).controlSize(.small)}
                 }.frame(minWidth:0,maxWidth:.infinity,minHeight:0,maxHeight:.infinity)
             }
+            VStack(spacing:0) {
+                LinearGradient(colors:[.black.opacity(0.75),.black.opacity(0.3),.clear],startPoint:.top,endPoint:.bottom).frame(height:46)
+                Spacer(minLength:0)
+                LinearGradient(colors:[.clear,.black.opacity(0.3),.black.opacity(0.75)],startPoint:.top,endPoint:.bottom).frame(height:32)
+            }.allowsHitTesting(false)
             HStack(spacing:5) {
                 StatusDot(session:session)
                 Text(session.profile.name).font(.system(size:12,weight:.semibold,design:.rounded)).foregroundStyle(session.tint)
@@ -57,17 +62,6 @@ struct DesktopTile: View {
             .dropDestination(for:String.self) {items,location in guard let value=items.first,let source=UUID(uuidString:value) else {return false};return model.moveInWorkspace(source,relativeTo:session.id,after:location.x>tileWidth/2)} isTargeted:{dropTarget=$0}
             .contextMenu {ConnectionActions(session:session,model:model);Divider();Button("Open terminal"){_=model.openTerminal(session)}.disabled(!session.profile.usesSSH);Button("Edit connection"){model.editProfile(session)};Button("Duplicate connection"){model.duplicateProfile(session)};ConnectionOrderMenu(session:session,model:model);ProfileColorMenu(session:session,model:model)}
             .help(session.tooltip)
-    }
-}
-struct TerminalPreview: View {
-    @ObservedObject var session: DesktopSession
-    var body: some View {
-        TimelineView(.periodic(from:.now,by:1)) {_ in
-            if let tab=session.selectedTab {
-                Text(tab.read(limit:2400)).font(.system(size:8,design:.monospaced)).foregroundStyle(session.tint.opacity(0.8))
-                    .frame(maxWidth:.infinity,maxHeight:.infinity,alignment:.bottomLeading).padding(6).padding(.top,20).clipped()
-            } else {Image(systemName:"terminal").font(.system(size:28,weight:.light)).foregroundStyle(session.tint.opacity(0.5)).frame(maxWidth:.infinity,maxHeight:.infinity)}
-        }
     }
 }
 struct DesktopPanel: View {

@@ -21,13 +21,11 @@ struct HostMetricsReadout: View {
                 let metrics=session.hostMetrics
                 let stale=metrics.map{context.date.timeIntervalSince($0.sampledAt)>90} ?? true
                 HStack(spacing:4) {
-                    if sidebar {
-                        Image(systemName:"cpu");Text(percent(metrics?.cpuPercent))
-                        Image(systemName:"internaldrive");Text(metrics?.disk.map{bytes($0.availableBytes)} ?? "—")
-                    } else {
-                        Text("CPU \(percent(metrics?.cpuPercent)) · Disk \(percent(metrics?.disk?.usedPercent))")
-                    }
+                    Image(systemName:"cpu");Text(percent(metrics?.cpuPercent))
+                    Image(systemName:"internaldrive").padding(.leading,2)
+                    Text(percent(metrics?.disk?.usedPercent))
                 }.font(.system(size:9,weight:.medium,design:.monospaced)).lineLimit(1).fixedSize()
+                    .accessibilityElement(children:.ignore).accessibilityLabel("CPU \(percent(metrics?.cpuPercent)), disk \(percent(metrics?.disk?.usedPercent)) used")
                     .foregroundStyle(sidebar ? Color.secondary:session.tint)
                     .opacity(stale ? 0.45:1).shadow(color:sidebar ? .clear:.black,radius:2,x:0,y:1)
                     .help(tooltip)
