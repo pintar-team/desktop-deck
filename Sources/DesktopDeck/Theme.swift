@@ -26,10 +26,12 @@ struct WindowBackdrop: NSViewRepresentable {
     func updateNSView(_ view: NSView,context: Context) {
         DispatchQueue.main.async {
             guard let window=view.window else {return}
-            window.titleVisibility = .hidden; window.titlebarAppearsTransparent=true
-            window.toolbar=nil;window.titlebarSeparatorStyle = .none
+            if window.titleVisibility != .hidden {window.titleVisibility = .hidden}
+            if !window.titlebarAppearsTransparent {window.titlebarAppearsTransparent=true}
+            if window.toolbar != nil {window.toolbar=nil}
+            if window.titlebarSeparatorStyle != .none {window.titlebarSeparatorStyle = .none}
             window.acceptsMouseMovedEvents=true
-            window.styleMask.insert(.fullSizeContentView)
+            if !window.styleMask.contains(.fullSizeContentView) {window.styleMask.insert(.fullSizeContentView)}
             window.backgroundColor=NSColor(red:0.025,green:0.04,blue:0.065,alpha:1)
             for button in [NSWindow.ButtonType.closeButton,.miniaturizeButton,.zoomButton] {window.standardWindowButton(button)?.isHidden=hideButtons}
         }

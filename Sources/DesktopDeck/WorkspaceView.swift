@@ -58,7 +58,7 @@ struct WorkspaceView: View {
         }
         .background(WindowBackdrop(hideButtons:chromeMode != "normal"))
         .tint(activeTint)
-        .ignoresSafeArea(.container,edges:.top).toolbarVisibility(.hidden,for:.windowToolbar)
+        .ignoresSafeArea(.container,edges:model.isFullScreen ? []:.top).toolbarVisibility(.hidden,for:.windowToolbar)
         .animation(reduceMotion ? nil:.smooth(duration:0.18),value:toolbarVisible)
         .overlay(alignment:.bottom) {if let s=model.focused {FeedbackToast(session:s).padding(.bottom,14)}}
         .onChange(of:chromeMode){_,_ in revealChrome=false;pinnedChrome=false;hideTask?.cancel()}
