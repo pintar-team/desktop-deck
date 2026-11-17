@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import MetalKit
 import DeckCore
+import CVNC
 
 @MainActor final class RemoteMetalView: MTKView, MTKViewDelegate {
     weak var session: DesktopSession? {
@@ -10,7 +11,7 @@ import DeckCore
                 promisedImage?.cancel();promisedImage=nil
                 texture=nil;previousTexture=nil;sequence = -1;connectionRevision = -1
                 blendTimer?.invalidate();blendTimer=nil;setNeedsDisplay(bounds)
-                modifiers=[]
+                modifiers=[];downSymbols.removeAll()
             }
         }
     }
@@ -26,6 +27,7 @@ import DeckCore
     private var sequence = -1
     private var connectionRevision = -1
     private var modifiers=NSEvent.ModifierFlags()
+    private var downSymbols=[UInt16:(revision:Int,keys:[UInt32])]()
     private var promisedImage: PromisedImageDrop?
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { interactive }
@@ -134,7 +136,7 @@ import DeckCore
         if e.scrollingDeltaY != 0 { s.pointer(p.0,p.1,e.scrollingDeltaY>0 ? 8:16); s.pointer(p.0,p.1,0) }
     }
     override func magnify(with e: NSEvent) { guard let s=session else { return };s.humanInput();s.zoom=min(8,max(0.25,s.zoom*(1+e.magnification))); setNeedsDisplay(bounds) }
-    override func resignFirstResponder() -> Bool { session?.releaseInput(); modifiers=[]; return super.resignFirstResponder() }
+    override func resignFirstResponder() -> Bool { session?.releaseInput(); modifiers=[];downSymbols.removeAll(); return super.resignFirstResponder() }
     @objc func paste(_ sender: Any?) {modifiers=[];session?.pasteMacClipboard()}
     @objc func copy(_ sender: Any?) {modifiers=[];session?.shortcut([0xffe3,0x63])}
     override func viewWillMove(toWindow newWindow: NSWindow?) {
@@ -181,10 +183,20 @@ import DeckCore
     private func symbols(_ event: NSEvent) -> [UInt32] {
         let special:[UInt16:UInt32]=[36:0xff0d,48:0xff09,51:0xff08,53:0xff1b,117:0xffff,123:0xff51,124:0xff53,125:0xff54,126:0xff52,115:0xff50,119:0xff57,116:0xff55,121:0xff56,122:0xffbe,120:0xffbf,99:0xffc0,118:0xffc1,96:0xffc2,97:0xffc3,98:0xffc4,100:0xffc5,101:0xffc6,109:0xffc7,103:0xffc8,111:0xffc9]
         if let key=special[event.keyCode] { return [key] }
-        return (event.charactersIgnoringModifiers ?? "").unicodeScalars.map { $0.value<256 ? $0.value : 0x01000000|$0.value }
+        return (event.charactersIgnoringModifiers ?? "").unicodeScalars.map { deck_vnc_keysym($0.value) }
     }
-    override func keyDown(with e: NSEvent) { guard interactive,let s=session else { return }; s.humanInput(); for key in symbols(e) { s.key(key,down:true) } }
-    override func keyUp(with e: NSEvent) { guard interactive,let s=session else { return }; for key in symbols(e) { s.key(key,down:false) } }
+    override func keyDown(with e: NSEvent) {
+        guard interactive,let s=session,s.active else {return};s.humanInput()
+        let keys: [UInt32]
+        if let binding=downSymbols[e.keyCode],binding.revision==s.connectionRevision {keys=binding.keys}
+        else {keys=symbols(e)}
+        downSymbols[e.keyCode]=(s.connectionRevision,keys)
+        for key in keys {s.key(key,down:true)}
+    }
+    override func keyUp(with e: NSEvent) {
+        guard interactive,let s=session,let binding=downSymbols.removeValue(forKey:e.keyCode),binding.revision==s.connectionRevision else {return}
+        for key in binding.keys {s.key(key,down:false)}
+    }
     override func flagsChanged(with e: NSEvent) {
         guard interactive,let s=session else { return }; s.humanInput(invalidatePendingPaste:false)
         for (flag,key):(NSEvent.ModifierFlags,UInt32) in [(.shift,0xffe1),(.control,0xffe3),(.option,0xffe9),(.command,0xffeb)] {

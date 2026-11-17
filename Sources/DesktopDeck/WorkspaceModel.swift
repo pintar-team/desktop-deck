@@ -3,6 +3,7 @@ import SwiftUI
 import DeckCore
 import Network
 import Combine
+import CVNC
 
 @MainActor final class DesktopSession: ObservableObject, Identifiable {
     let id: UUID
@@ -102,7 +103,7 @@ import Combine
     func text(_ text: String) throws {
         var commands=[VNCWorker.Event]()
         for scalar in text.unicodeScalars {
-            let key: UInt32=scalar.value==10 ? 0xff0d : scalar.value<256 ? scalar.value : 0x01000000|scalar.value
+            let key: UInt32=scalar.value==10 ? 0xff0d : deck_vnc_keysym(scalar.value)
             commands.append(.key(key,true)); commands.append(.key(key,false))
         }
         guard worker?.enqueueBatch(commands)==true else { throw DeckError("INPUT_BACKPRESSURE: input was not queued; inspect before retrying") }

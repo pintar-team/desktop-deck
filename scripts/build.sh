@@ -48,7 +48,7 @@ cp .build/AppIcon.icns "$APP/Contents/Resources/"
 NOTICES="$APP/Contents/Resources/Licenses"
 mkdir -p "$NOTICES"
 cp LICENSE "$NOTICES/DesktopDeck-GPL-3.0.txt"
-for dependency in Vendor/LibVNCServer .build/checkouts/*; do
+for dependency in Vendor/LibVNCServer Vendor/TurboVNC .build/checkouts/*; do
   name="$(basename "$dependency")"
   for notice in "$dependency"/LICENSE* "$dependency"/COPYING*; do
     if [ -f "$notice" ]; then cp -f "$notice" "$NOTICES/$name-$(basename "$notice")"; fi

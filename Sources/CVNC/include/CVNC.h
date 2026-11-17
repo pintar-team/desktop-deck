@@ -12,6 +12,7 @@ int deck_vnc_dirty(DeckVNC *);
 int deck_vnc_auth_failed(DeckVNC *);
 int deck_vnc_pointer(DeckVNC *, int x, int y, int mask);
 int deck_vnc_key(DeckVNC *, uint32_t key, int down);
+uint32_t deck_vnc_keysym(uint32_t unicode_scalar);
 int deck_vnc_quality(DeckVNC *, int quality, int compression);
 int deck_vnc_resize(DeckVNC *, int width, int height);
 int deck_vnc_cancel_resize(DeckVNC *);

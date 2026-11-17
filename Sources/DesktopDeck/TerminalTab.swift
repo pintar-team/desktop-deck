@@ -3,12 +3,36 @@ import SwiftUI
 import SwiftTerm
 import DeckCore
 
+final class TerminalTiming: @unchecked Sendable {
+    private let lock=NSLock()
+    private var inputAt: TimeInterval?
+    private var eventDelay: Double?,echoDelay: Double?
+    func input(eventTime: TimeInterval?=nil) {
+        let now=ProcessInfo.processInfo.systemUptime
+        lock.lock();defer{lock.unlock()}
+        inputAt=now
+        if let eventTime {eventDelay=max(0,(now-eventTime)*1000)}
+    }
+    func output() {
+        let now=ProcessInfo.processInfo.systemUptime
+        lock.lock();defer{lock.unlock()}
+        if let inputAt,now-inputAt<2 {echoDelay=(now-inputAt)*1000}
+        inputAt=nil
+    }
+    func reset() {lock.lock();inputAt=nil;eventDelay=nil;echoDelay=nil;lock.unlock()}
+    var snapshot: [String:Double] {
+        lock.lock();defer{lock.unlock()}
+        return ["eventDispatchMs":eventDelay,"inputToNextOutputMs":echoDelay].compactMapValues{$0}
+    }
+}
+
 @MainActor final class DeckTerminalView: LocalProcessTerminalView {
     var human: (()->Void)?
     var feedback: ((String)->Void)?
+    let timing=TerminalTiming()
     override func mouseDown(with event: NSEvent) { human?(); super.mouseDown(with:event) }
     override func paste(_ sender: Any) {
-        human?();super.paste(sender)
+        human?();timing.input();super.paste(sender)
         if NSPasteboard.general.string(forType:.string) != nil {feedback?("Pasted")}
     }
     override func copy(_ sender: Any) {
@@ -37,10 +61,14 @@ import DeckCore
         self.profile=profile; self.id=id
         view.processDelegate=self; view.font=NSFont.monospacedSystemFont(ofSize:13,weight:.regular)
         view.human = { [weak self] in self?.lease.human() }
-        view.setProcessOutputHandler { [weak self] in Task { @MainActor in self?.outputRevision += 1 } }
+        let timing=view.timing
+        view.setProcessOutputHandler { [weak self,timing] in timing.output();Task { @MainActor in self?.outputRevision += 1 } }
         eventMonitor=NSEvent.addLocalMonitorForEvents(matching:[.keyDown,.leftMouseDown,.rightMouseDown]) { [weak self] event in
             if let self,event.window===view.window,let first=event.window?.firstResponder as? NSView,
-               first===view || first.isDescendant(of:view) { lease.human() }
+               first===view || first.isDescendant(of:view) {
+                lease.human()
+                if event.type == .keyDown {view.timing.input(eventTime:event.timestamp)}
+            }
             return event
         }
     }
@@ -66,7 +94,7 @@ import DeckCore
                     useTmux=r.contains("DECK_TMUX")
                 }
                 guard !Task.isCancelled,desired,generation==g else { return }
-                persistent=useTmux;processActive=true
+                persistent=useTmux;processActive=true;view.timing.reset()
                 let command=persistent ? "exec tmux -L desktop-deck new-session -A -s \(Shell.quote(tmuxName))" : "exec \"${SHELL:-/bin/sh}\" -l"
                 view.startProcess(executable:"/usr/bin/ssh",args:Shell.sshArguments(profile,interactive:true)+["--",profile.sshHost,command],environment:["TERM=xterm-256color","LANG=en_US.UTF-8","PATH=/usr/bin:/bin:/usr/sbin:/sbin"])
                 status=persistent ? "Connected · persistent" : "Connected · plain SSH"
@@ -82,7 +110,7 @@ import DeckCore
         if persistent { _=try await Commands.ssh(profile,"tmux -L desktop-deck kill-session -t \(Shell.quote(tmuxName))") }
         status="Ended"
     }
-    func send(_ text: String) { view.send(source:view,data:Array(text.utf8)[...]) }
+    func send(_ text: String) { view.timing.input();view.send(source:view,data:Array(text.utf8)[...]) }
     func read(limit: Int) -> String {
         guard let snapshot=view.terminalContentSnapshot(region:.history(maximumScrollbackRows:1000)) else { return "" }
         return String(snapshot.rows.map(\.text).joined(separator:"\n").suffix(min(max(limit,1),65536)))
@@ -139,7 +167,7 @@ import DeckCore
         terminal.setFrameOrigin(.zero)
         // SwiftTerm resizes its terminal model and PTY in setFrameSize.
         // Assigning the frame rectangle can bypass that AppKit override.
-        if bounds.width>0 && bounds.height>0 {terminal.setFrameSize(bounds.size)}
+        if bounds.width>0 && bounds.height>0,terminal.frame.size != bounds.size {terminal.setFrameSize(bounds.size)}
         focusRequest?.schedule(on:terminal)
     }
     override func setFrameSize(_ size: NSSize) {super.setFrameSize(size);fitTerminal()}
