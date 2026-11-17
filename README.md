@@ -7,6 +7,7 @@ A native macOS workspace for VNC desktops and SSH terminals, with local MCP tool
 - Automatic reconnect with bounded attempts and inline status.
 - Full-window SSH terminals or a resizable split view; tmux is optional.
 - Clipboard transfer, keyboard shortcuts, zoom and explicit remote resolution control.
+- Screenshot/image paste and drop through SSH on Linux X11 desktops with `xclip`.
 - Compact host CPU/disk metrics over SSH.
 - 16 MCP tools for profiles, workspaces, screenshots, input and shared terminal tabs.
 

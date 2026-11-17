@@ -4,7 +4,15 @@ import MetalKit
 import DeckCore
 
 @MainActor final class RemoteMetalView: MTKView, MTKViewDelegate {
-    weak var session: DesktopSession?
+    weak var session: DesktopSession? {
+        didSet {
+            if oldValue?.id != session?.id {
+                promisedImage?.cancel();promisedImage=nil
+                texture=nil;previousTexture=nil;sequence = -1;connectionRevision = -1
+                blendTimer?.invalidate();blendTimer=nil;setNeedsDisplay(bounds)
+            }
+        }
+    }
     var interactive=false
     var smoothPreview=true
     private var pipeline: MTLRenderPipelineState?
@@ -16,12 +24,16 @@ import DeckCore
     private var sequence = -1
     private var connectionRevision = -1
     private var modifiers=NSEvent.ModifierFlags()
+    private var promisedImage: PromisedImageDrop?
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { interactive }
+    override var intrinsicContentSize: NSSize {NSSize(width:NSView.noIntrinsicMetric,height:NSView.noIntrinsicMetric)}
     init() {
         let device=MTLCreateSystemDefaultDevice()
         super.init(frame:.zero,device:device)
         isPaused=true; enableSetNeedsDisplay=true; framebufferOnly=true
+        setContentHuggingPriority(.defaultLow,for:.horizontal);setContentHuggingPriority(.defaultLow,for:.vertical)
+        setContentCompressionResistancePriority(.defaultLow,for:.horizontal);setContentCompressionResistancePriority(.defaultLow,for:.vertical)
         clearColor=MTLClearColorMake(0.035,0.04,0.05,1); delegate=self
         commands=device?.makeCommandQueue()
         let source="""
@@ -43,9 +55,12 @@ import DeckCore
             pipeline=try device?.makeRenderPipelineState(descriptor:descriptor)
         } catch { session?.detail="Metal pipeline unavailable: \(error.localizedDescription)" }
         addTrackingArea(NSTrackingArea(rect:.zero,options:[.activeInKeyWindow,.inVisibleRect,.mouseMoved],owner:self))
+        registerForDraggedTypes([.fileURL,.png,.tiff]+NSFilePromiseReceiver.readableDraggedTypes.map{NSPasteboard.PasteboardType($0)})
     }
     required init(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
-    func mtkView(_ view: MTKView,drawableSizeWillChange size: CGSize) { if interactive { session?.viewport=bounds.size } }
+    override func setFrameSize(_ newSize: NSSize) {super.setFrameSize(newSize);viewportChanged()}
+    private func viewportChanged() {if interactive {session?.viewport=bounds.size};setNeedsDisplay(bounds)}
+    func mtkView(_ view: MTKView,drawableSizeWillChange size: CGSize) {viewportChanged()}
     var transform: ViewTransform {
         ViewTransform(width:Double(bounds.width),height:Double(bounds.height),frameWidth:Double(session?.frame?.width ?? 1),frameHeight:Double(session?.frame?.height ?? 1),zoom:interactive ? session?.zoom ?? 1:1,panX:interactive ? Double(session?.pan.x ?? 0):0,panY:interactive ? Double(session?.pan.y ?? 0):0)
     }
@@ -93,7 +108,7 @@ import DeckCore
     }
     private func mouse(_ event: NSEvent,button: Int?,down: Bool?) {
         guard interactive,let s=session,let p=point(event) else { return }
-        s.humanInput(); if down==true { window?.makeFirstResponder(self) }
+        s.humanInput(invalidatePendingPaste:event.type != .mouseMoved); if down==true { window?.makeFirstResponder(self) }
         var mask=s.mask
         if let button,let down { if down { mask |= button } else { mask &= ~button } }
         s.pointer(p.0,p.1,mask)
@@ -106,20 +121,52 @@ import DeckCore
     override func otherMouseUp(with e: NSEvent) { mouse(e,button:2,down:false) }
     override func mouseMoved(with e: NSEvent) { mouse(e,button:nil,down:nil) }
     override func mouseDragged(with e: NSEvent) {
-        if e.modifierFlags.contains(.option),let s=session { s.pan.x += e.deltaX; s.pan.y += e.deltaY; setNeedsDisplay(bounds) }
+        if e.modifierFlags.contains(.option),let s=session {s.humanInput();s.pan.x += e.deltaX; s.pan.y += e.deltaY; setNeedsDisplay(bounds) }
         else { mouse(e,button:nil,down:nil) }
     }
     override func rightMouseDragged(with e: NSEvent) { mouse(e,button:nil,down:nil) }
     override func scrollWheel(with e: NSEvent) {
         guard interactive,let s=session else { return }
-        if e.modifierFlags.contains(.option) { s.zoom=min(8,max(0.25,s.zoom*exp(-e.scrollingDeltaY*0.01))); setNeedsDisplay(bounds); return }
+        if e.modifierFlags.contains(.option) {s.humanInput();s.zoom=min(8,max(0.25,s.zoom*exp(-e.scrollingDeltaY*0.01))); setNeedsDisplay(bounds); return }
         guard let p=point(e) else { return }; s.humanInput()
         if e.scrollingDeltaY != 0 { s.pointer(p.0,p.1,e.scrollingDeltaY>0 ? 8:16); s.pointer(p.0,p.1,0) }
     }
-    override func magnify(with e: NSEvent) { guard let s=session else { return }; s.zoom=min(8,max(0.25,s.zoom*(1+e.magnification))); setNeedsDisplay(bounds) }
+    override func magnify(with e: NSEvent) { guard let s=session else { return };s.humanInput();s.zoom=min(8,max(0.25,s.zoom*(1+e.magnification))); setNeedsDisplay(bounds) }
     override func resignFirstResponder() -> Bool { session?.releaseInput(); modifiers=[]; return super.resignFirstResponder() }
     @objc func paste(_ sender: Any?) {modifiers=[];session?.pasteMacClipboard()}
     @objc func copy(_ sender: Any?) {modifiers=[];session?.shortcut([0xffe3,0x63])}
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow==nil {promisedImage?.cancel();promisedImage=nil}
+        super.viewWillMove(toWindow:newWindow)
+    }
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard interactive,session?.active==true else {return []}
+        return sender.draggingPasteboard.availableType(from:[.fileURL,.png,.tiff]) != nil || sender.draggingPasteboard.canReadObject(forClasses:[NSFilePromiseReceiver.self],options:nil) ? .copy:[]
+    }
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {draggingEntered(sender)}
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard interactive,let session,session.active else {return false}
+        let location=convert(sender.draggingLocation,from:nil)
+        guard transform.remote(x:location.x,y:location.y) != nil else {return false}
+        do {
+            promisedImage?.cancel();promisedImage=nil
+            window?.makeKeyAndOrderFront(nil);NSApp.activate();window?.makeFirstResponder(self)
+            let receivers=sender.draggingPasteboard.readObjects(forClasses:[NSFilePromiseReceiver.self],options:nil) as? [NSFilePromiseReceiver] ?? []
+            if receivers.isEmpty {
+                guard let data=try ImageClipboard.read(sender.draggingPasteboard) else {session.showFeedback("Drop an image file");return false}
+                session.pasteImage(data);return true
+            }
+            guard receivers.count==1,let receiver=receivers.first else {session.showFeedback("Drop one image file");return false}
+            session.humanInput();let revision=session.connectionRevision,geometry=session.geometry,human=session.humanActionRevision
+            promisedImage=try PromisedImageDrop(receiver) {[weak self,weak session] data,error in
+                guard let self,let session else {return};self.promisedImage=nil
+                if let error {session.showFeedback(error);return}
+                guard self.session?.id==session.id,session.active,session.connectionRevision==revision,session.geometry==geometry,session.humanActionRevision==human,self.window?.firstResponder === self else {session.showFeedback("Image drop cancelled — screen changed");return}
+                if let data {session.pasteImage(data)}
+            }
+            return true
+        } catch {session.showFeedback(error.localizedDescription);return false}
+    }
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if interactive,window?.firstResponder === self,event.modifierFlags.contains(.command) {
             switch event.charactersIgnoringModifiers?.lowercased() {
@@ -138,7 +185,7 @@ import DeckCore
     override func keyDown(with e: NSEvent) { guard interactive,let s=session else { return }; s.humanInput(); for key in symbols(e) { s.key(key,down:true) } }
     override func keyUp(with e: NSEvent) { guard interactive,let s=session else { return }; for key in symbols(e) { s.key(key,down:false) } }
     override func flagsChanged(with e: NSEvent) {
-        guard interactive,let s=session else { return }; s.humanInput()
+        guard interactive,let s=session else { return }; s.humanInput(invalidatePendingPaste:false)
         for (flag,key):(NSEvent.ModifierFlags,UInt32) in [(.shift,0xffe1),(.control,0xffe3),(.option,0xffe9),(.command,0xffeb)] {
             if e.modifierFlags.contains(flag) != modifiers.contains(flag) { s.key(key,down:e.modifierFlags.contains(flag)) }
         }; modifiers=e.modifierFlags
@@ -150,5 +197,26 @@ struct RemoteSurface: NSViewRepresentable {
     @AppStorage("previewSmoothing") private var smoothing=true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     func makeNSView(context: Context) -> RemoteMetalView { let view=RemoteMetalView(); view.session=session; return view }
-    func updateNSView(_ view: RemoteMetalView,context: Context) { view.session=session; view.interactive=interactive; if interactive {session.inputView=view};view.smoothPreview=smoothing && !reduceMotion; view.setNeedsDisplay(view.bounds) }
+    func sizeThatFits(_ proposal: ProposedViewSize,nsView: RemoteMetalView,context: Context) -> CGSize? {
+        guard let width=proposal.width,let height=proposal.height,width.isFinite,height.isFinite else {return nil}
+        return CGSize(width:max(0,width),height:max(0,height))
+    }
+    func updateNSView(_ view: RemoteMetalView,context: Context) {
+        if view.session?.id != session.id,let previous=view.session,previous.inputView === view {previous.releaseInput();previous.inputView=nil}
+        view.session=session;view.interactive=interactive
+        if interactive {session.inputView=view;session.viewport=view.bounds.size}
+        else if session.inputView === view {session.inputView=nil}
+        view.smoothPreview=smoothing && !reduceMotion;view.setNeedsDisplay(view.bounds)
+    }
+    static func dismantleNSView(_ view: RemoteMetalView,coordinator: ()) {
+        if let previous=view.session,previous.inputView === view {previous.releaseInput();previous.inputView=nil}
+        view.session=nil
+    }
+}
+@MainActor extension DesktopSession {
+    var viewState: [String:Any] {
+        let view=inputView.flatMap{$0.session?.id==id && $0.interactive && $0.window != nil ? $0:nil}
+        let size=view?.bounds.size ?? viewport,visible=view.map{$0.bounds.intersection($0.visibleRect).size} ?? size
+        return ["attached":view != nil,"viewportWidth":size.width,"viewportHeight":size.height,"visibleWidth":visible.width,"visibleHeight":visible.height,"zoom":zoom,"panX":pan.x,"panY":pan.y]
+    }
 }

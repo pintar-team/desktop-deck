@@ -5,25 +5,31 @@ import Darwin
 struct CommandResult { let output: String; let status: Int32 }
 enum Commands {
     static func serverTool(_ p: Profile,_ name: String) -> String {Shell.quote(p.turboVNCDirectory+"/bin/"+name)}
-    static func run(_ executable: String, _ arguments: [String], timeout: Double = 20) async throws -> CommandResult {
+    static func run(_ executable: String, _ arguments: [String], timeout: Double = 20,inputFile: URL?=nil,onOutput: (@Sendable (String)->Void)?=nil) async throws -> CommandResult {
         let job=Task.detached { () throws -> CommandResult in
             let task=Process(), pipe=Pipe(); task.executableURL=URL(fileURLWithPath:executable)
-            task.arguments=arguments; task.standardInput=FileHandle.nullDevice
+            let input=try inputFile.map{try FileHandle(forReadingFrom:$0)}
+            defer {try? input?.close()}
+            task.arguments=arguments; task.standardInput=input ?? FileHandle.nullDevice
             task.standardOutput=pipe; task.standardError=pipe
             let capture=Capture()
             let fd=pipe.fileHandleForReading.fileDescriptor
             guard fcntl(fd,F_SETFL,fcntl(fd,F_GETFL)|O_NONBLOCK)==0 else {throw DeckError("Cannot configure command output")}
-            try task.run()
+            try Task.checkCancellation();try task.run()
             try? pipe.fileHandleForWriting.close()
             defer {stopOwned(task);try? pipe.fileHandleForReading.close()}
-            let end=Date().addingTimeInterval(timeout)
+            let end=ContinuousClock.now.advanced(by:.seconds(timeout))
+            var reported=""
+            func report() {if let onOutput {let text=capture.text;if text != reported {reported=text;onOutput(text)}}}
             while task.isRunning {
                 try Task.checkCancellation()
                 drain(fd,into:capture)
-                guard Date()<end else {throw DeckError("SSH command exceeded \(Int(timeout)) seconds")}
+                report()
+                guard ContinuousClock.now<end else {throw DeckError("SSH command exceeded \(Int(timeout)) seconds")}
                 try await Task.sleep(nanoseconds:30_000_000)
             }
             drain(fd,into:capture)
+            report()
             return CommandResult(output:capture.text,status:task.terminationStatus)
         }
         return try await withTaskCancellationHandler(operation:{try await job.value},onCancel:{job.cancel()})
@@ -37,8 +43,8 @@ enum Commands {
     }
     private static func stopOwned(_ task: Process) {
         guard task.isRunning else {return};task.terminate()
-        let deadline=Date().addingTimeInterval(0.2)
-        while task.isRunning && Date()<deadline {usleep(10_000)}
+        let deadline=ContinuousClock.now.advanced(by:.milliseconds(200))
+        while task.isRunning && ContinuousClock.now<deadline {usleep(10_000)}
         if task.isRunning {kill(task.processIdentifier,SIGKILL)}
     }
     static func ssh(_ p: Profile, _ command: String, timeout: Double = 20) async throws -> String {

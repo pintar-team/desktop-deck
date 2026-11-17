@@ -71,8 +71,8 @@ final class ControlServer: @unchecked Sendable {
         switch tool {
         case "profiles_manage":return try manageProfiles(a)
         case "workspace_transfer":return try transferConfiguration(a)
-        case "connections_list": return ["version":"0.3.0","profiles":sessions.map { s in
-            ["id":s.id.uuidString,"name":s.profile.name,"state":s.state,"detail":s.detail,"generation":s.connectionRevision,"geometry":s.geometry,"width":s.frame?.width ?? 0,"height":s.frame?.height ?? 0,"ssh":s.profile.usesSSH,"vnc":s.profile.hasVNC,"sessionManager":s.profile.sessionManager,"quality":s.profile.quality,"view":s.surfaceMode,"resolutionStatus":s.resolutionStatus,"attempt":s.attemptNumber,"maxAttempts":ConnectionLimits.attempts,"retryIn":s.retryCountdown,"lastError":s.lastError,"hostMetrics":s.hostMetrics?.rpc ?? [:],"metricsError":s.hostMetricsError] as [String:Any]
+        case "connections_list": return ["version":"0.3.1","profiles":sessions.map { s in
+            ["id":s.id.uuidString,"name":s.profile.name,"state":s.state,"detail":s.detail,"generation":s.connectionRevision,"geometry":s.geometry,"width":s.frame?.width ?? 0,"height":s.frame?.height ?? 0,"ssh":s.profile.usesSSH,"vnc":s.profile.hasVNC,"sessionManager":s.profile.sessionManager,"quality":s.profile.quality,"view":s.surfaceMode,"viewState":s.viewState,"resolutionStatus":s.resolutionStatus,"attempt":s.attemptNumber,"maxAttempts":ConnectionLimits.attempts,"retryIn":s.retryCountdown,"lastError":s.lastError,"hostMetrics":s.hostMetrics?.rpc ?? [:],"metricsError":s.hostMetricsError] as [String:Any]
         }]
         case "connection_control":
             let s=try session(); switch string("action") { case "connect","reconnect": connect(s); case "disconnect": disconnect(s); default: throw DeckError("Expected connect, disconnect or reconnect") }; return ["state":s.state]

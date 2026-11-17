@@ -42,7 +42,7 @@ struct DesktopTile: View {
                     Image(systemName:"display").font(.system(size:26,weight:.light)).foregroundStyle(session.tint.opacity(0.5))
                     if session.desired && !session.needsAction {ProgressView().controlSize(.small)}
                     if session.needsAction || !session.desired {Button(session.needsAction ? "Try again":"Connect"){model.connect(session)}.buttonStyle(.bordered).controlSize(.small)}
-                }.frame(maxWidth:.infinity,maxHeight:.infinity)
+                }.frame(minWidth:0,maxWidth:.infinity,minHeight:0,maxHeight:.infinity)
             }
             HStack(spacing:5) {
                 StatusDot(session:session)
@@ -93,13 +93,20 @@ struct DesktopPanel: View {
         }.onDisappear{session.releaseInput()}
     }
     private var connectionBanner: some View {
-        HStack(spacing:8) {
-            VStack(alignment:.leading,spacing:2) {
-                Text(session.connectionSummary).font(.caption.weight(.medium)).lineLimit(1)
-                if !session.lastError.isEmpty {Text(session.lastError).font(.caption2).foregroundStyle(.secondary).lineLimit(2).help(session.lastError)}
-            }
-            Button(session.needsAction ? "Try again":session.desired ? "Retry now":"Connect"){model.connect(session)}.fixedSize()
+        Group {
+            if session.frame==nil {
+                VStack(spacing:10) {connectionStatus;connectionButton}.multilineTextAlignment(.center)
+            } else {HStack(spacing:8) {connectionStatus;connectionButton}}
         }.buttonStyle(.borderless)
+    }
+    private var connectionStatus: some View {
+        VStack(alignment:session.frame==nil ? .center:.leading,spacing:2) {
+            Text(session.connectionSummary).font(.caption.weight(.medium)).lineLimit(1)
+            if !session.lastError.isEmpty {Text(session.lastError).font(.caption2).foregroundStyle(.secondary).lineLimit(2).help(session.lastError)}
+        }
+    }
+    private var connectionButton: some View {
+        Button(session.needsAction ? "Try again":session.desired ? "Retry now":"Connect"){model.connect(session)}.fixedSize()
     }
 }
 struct TerminalPanel: View {

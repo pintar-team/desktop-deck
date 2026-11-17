@@ -10,30 +10,40 @@ struct WorkspaceView: View {
     @AppStorage("showHostMetrics") private var showHostMetrics=true
     @AppStorage("chromeMode") private var chromeMode="normal"
     @AppStorage("sidebarVisible") private var sidebarVisible=true
-    @AppStorage("sidebarWidth") private var sidebarWidth=205.0
+    @AppStorage("sidebarWidth") private var savedSidebarWidth=205.0
+    @State private var resizingSidebarWidth: Double?
     @State private var revealChrome=false
     @State private var pinnedChrome=false
     @State private var hideTask: Task<Void,Never>?
-    @State private var dragOrigin: Double?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var toolbarVisible: Bool {chromeMode=="normal" || revealChrome}
     private var activeTint: Color {model.focused?.tint ?? DeckTheme.accent}
+    private var sidebarWidth: Double {SidebarResizeHandle.clamp(resizingSidebarWidth ?? savedSidebarWidth)}
     var body: some View {
+      GeometryReader { geometry in
+        let contentWidth=max(0,geometry.size.width-(sidebarVisible ? sidebarWidth+6:0))
         HStack(spacing:0) {
             if sidebarVisible {
                 sidebar.frame(width:sidebarWidth)
-                Rectangle().fill(DeckTheme.border.opacity(0.6)).frame(width:1)
-                    .gesture(DragGesture().onChanged {v in
-                        if dragOrigin==nil {dragOrigin=sidebarWidth}
-                        sidebarWidth=min(300,max(170,(dragOrigin ?? sidebarWidth)+v.translation.width))
-                    }.onEnded{_ in dragOrigin=nil})
+                SidebarResizeHandle(width:sidebarWidth,change:{width in
+                    var transaction=Transaction();transaction.disablesAnimations=true
+                    withTransaction(transaction){resizingSidebarWidth=width}
+                },finish:{width in savedSidebarWidth=width;resizingSidebarWidth=nil})
+                    .frame(width:6).frame(maxHeight:.infinity)
+                    .background(DeckTheme.panel)
+                    .overlay(Rectangle().fill(DeckTheme.border.opacity(0.8)).frame(width:1).allowsHitTesting(false))
             }
             VStack(spacing:0) {
-                if toolbarVisible {toolbar.zIndex(2).transition(.move(edge:.top).combined(with:.opacity))}
+                if toolbarVisible {
+                    ScrollView(.horizontal,showsIndicators:false){toolbar.frame(minWidth:contentWidth)}
+                        .frame(height:30).zIndex(2).transition(.move(edge:.top).combined(with:.opacity))
+                }
                 if !model.error.isEmpty {errorBanner}
                 content.clipped().zIndex(0)
-            }.frame(maxWidth:.infinity,maxHeight:.infinity).background(DeckTheme.background)
-        }
+            }.frame(width:contentWidth,height:geometry.size.height)
+                .background(DeckTheme.background)
+        }.frame(width:geometry.size.width,height:geometry.size.height,alignment:.leading)
+      }
         .overlay(alignment:.topTrailing) {
             if !toolbarVisible {
                 HStack(spacing:3) {
@@ -69,7 +79,7 @@ struct WorkspaceView: View {
                     }.frame(height:112).background(DeckTheme.background)}
                 }
             }
-        }.frame(maxWidth:.infinity,maxHeight:.infinity)
+        }.frame(minWidth:0,maxWidth:.infinity,minHeight:0,maxHeight:.infinity)
     }
     private var sidebar: some View {
         VStack(spacing:0) {

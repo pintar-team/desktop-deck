@@ -21,6 +21,10 @@ import Combine
     @Published var feedback: FeedbackNotice?
     weak var inputView: RemoteMetalView?
     var clipboardInFlight=false
+    @Published var imageUploading=false
+    var imageTransfer: Task<Void,Never>?
+    var imageTransferID: UUID?
+    var humanActionRevision=0
     var clipboardPasteKeys: [UInt32]?
     var clipboardFeedback="Clipboard sent"
     var copyFeedbackIntent=CopyFeedbackIntent()
@@ -80,7 +84,7 @@ import Combine
         if let frame {lines.append("\(frame.width) × \(frame.height) · \(profile.quality)")}
         return lines.filter{!$0.isEmpty}.joined(separator:"\n")
     }
-    func humanInput() { if lease.owner != nil {releaseInput()}; lease.human() }
+    func humanInput(invalidatePendingPaste: Bool=true) {if invalidatePendingPaste {humanActionRevision += 1};if lease.owner != nil {releaseInput()}; lease.human() }
     func releaseInput() {
         for key in pressed { worker?.enqueue(.key(key,false)) }; pressed.removeAll()
         heldModifiers.removeAll();mask=0; worker?.enqueue(.pointer(lastPoint.0,lastPoint.1,0))
@@ -229,7 +233,10 @@ import Combine
         network.start(queue:DispatchQueue(label:"dev.desktop-deck.network"))
         leaseTimer=Timer.scheduledTimer(withTimeInterval:1,repeats:true) { [weak self] _ in
             Task { @MainActor in guard let self else { return }
-                for s in self.sessions {s.retryCountdown=max(0,Int(ceil(s.retryAt?.timeIntervalSinceNow ?? 0)))}
+                for s in self.sessions {
+                    s.retryCountdown=max(0,Int(ceil(s.retryAt?.timeIntervalSinceNow ?? 0)))
+                    if s.imageUploading {s.lease.human()}
+                }
                 for s in self.sessions where s.lease.owner != nil && Date() >= s.lease.expiry { s.releaseInput(); s.lease=InputLease() }
                 self.hostMonitor.tick(self.sessions,enabled:UserDefaults.standard.object(forKey:"showHostMetrics") as? Bool ?? true)
             }

@@ -15,11 +15,12 @@ struct FeedbackNotice: Identifiable {
             if self?.feedback?.id==notice.id {self?.feedback=nil}
         }
     }
-    func resetClipboard() {remoteClipboard=nil;clipboardInFlight=false;clipboardPasteKeys=nil;clipboardStatus="Idle";copyFeedbackIntent=CopyFeedbackIntent()}
+    func resetClipboard() {cancelImageTransfer();remoteClipboard=nil;clipboardInFlight=false;clipboardPasteKeys=nil;clipboardStatus="Idle";copyFeedbackIntent=CopyFeedbackIntent()}
     func receiveClipboard(_ text: String) {
         remoteClipboard=text
+        if text.isEmpty,NSPasteboard.general.availableType(from:[.png,.tiff,.fileURL]) != nil {return}
         guard UserDefaults.standard.object(forKey:"syncFocusedClipboard") as? Bool ?? true,
-              let inputView,let window=inputView.window,window.isKeyWindow,NSApp.isActive,
+              let inputView,inputView.session?.id==id,let window=inputView.window,window.isKeyWindow,NSApp.isActive,
               window.firstResponder === inputView else {return}
         copyRemoteClipboard(notify:copyFeedbackIntent.consume())
     }
@@ -34,6 +35,7 @@ struct FeedbackNotice: Identifiable {
         guard active,let worker else {throw DeckError("Desktop is not connected")}
         guard text.utf8.count<=Int(DECK_CLIPBOARD_LIMIT) else {throw DeckError("Clipboard text exceeds 1 MB")}
         guard !clipboardInFlight else {throw DeckError("Clipboard transfer is still in progress")}
+        cancelImageTransfer()
         if human {humanInput();releaseInput()}
         clipboardInFlight=true;clipboardPasteKeys=pasteKeys;clipboardStatus="Sending"
         clipboardFeedback=pasteKeys==nil ? "Clipboard sent":"Paste sent"
@@ -45,16 +47,18 @@ struct FeedbackNotice: Identifiable {
         let keys=clipboardPasteKeys;clipboardPasteKeys=nil
         guard result>0 else {clipboardStatus=result == -1 ? "Server clipboard supports Latin-1 text only":"Clipboard transfer failed";showFeedback(clipboardStatus);return}
         clipboardStatus="Sent"
-        if let keys {sendChord(keys)}
+        if let keys,!sendChord(keys) {return}
         showFeedback(clipboardFeedback)
     }
     func pasteMacClipboard(keys: [UInt32]?=[0xffe3,0x76]) {
+        do {if let image=try ImageClipboard.read(.general) {pasteImage(image,keys:keys);return}}
+        catch {showFeedback(error.localizedDescription);return}
         guard let text=NSPasteboard.general.string(forType:.string) else {showFeedback("No text in Mac clipboard");return}
         do {try sendClipboard(text,pasteKeys:keys)} catch {showFeedback(error.localizedDescription)}
     }
-    private func sendChord(_ keys: [UInt32]) {
+    @discardableResult func sendChord(_ keys: [UInt32]) -> Bool {
         let events=keys.map{VNCWorker.Event.key($0,true)}+keys.reversed().map{VNCWorker.Event.key($0,false)}
-        if worker?.enqueueBatch(events) != true {showFeedback("Input queue is full")}
+        guard worker?.enqueueBatch(events)==true else {showFeedback("Input queue is full");return false};return true
     }
     func shortcut(_ keys: [UInt32]) {
         guard active else {showFeedback("Desktop is not connected");return}
@@ -77,6 +81,7 @@ struct RemoteInputMenu: View {
             Button("Paste Mac clipboard · ⌘V"){session.pasteMacClipboard()}
             Button("Paste into terminal · Ctrl+Shift+V"){session.pasteMacClipboard(keys:[0xffe3,0xffe1,0x76])}
             Button("Send Mac clipboard without pasting"){session.pasteMacClipboard(keys:nil)}
+            if session.imageUploading {Button("Cancel image transfer"){session.cancelImageTransfer()}}
             Button("Copy remote clipboard to Mac"){session.copyRemoteClipboard()}.disabled(session.remoteClipboard==nil)
             Toggle("Receive clipboard from focused desktop",isOn:$receiveClipboard)
             Divider()

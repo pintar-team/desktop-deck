@@ -11,3 +11,7 @@ The adapter also advertises bounded UTF-8 clipboard receive capabilities after u
 The app is GPL-3.0-or-later. Upstream copyright/license notices remain with their sources. Bundled native and Swift dependencies retain their own licenses; the build includes their notices under Resources/Licenses.
 
 The app icon is generated with the built-in imagegen tool. Its editable source asset is `Resources/AppIcon-source.png`; the prompt is recorded in `Resources/AppIcon.prompt.txt`. The build deterministically generates standard macOS icon sizes and the plugin icon from that asset.
+
+The native video surface accepts the exact proposed viewport size and redraws on frame/drawable resizing. Workspace content width is explicitly bounded by the window minus the visible sidebar and divider. `connections_list.viewState` exposes read-only local zoom/pan and viewport/visible dimensions; `attached` identifies the active interactive surface. Reusing a native surface clears the previous session binding and textures.
+
+When a narrow window cannot fit every toolbar control, the single toolbar row scrolls horizontally instead of forcing the video canvas beyond its allocated width.
