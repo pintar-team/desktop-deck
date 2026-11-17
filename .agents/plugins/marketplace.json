@@ -1,0 +1,1 @@
+{"name":"desktop-deck-local","plugins":[{"name":"desktop-deck","source":{"source":"local","path":"./plugins/desktop-deck"},"policy":{"installation":"AVAILABLE","authentication":"ON_INSTALL"},"category":"Productivity"}]}

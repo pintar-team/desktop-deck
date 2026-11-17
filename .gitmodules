@@ -1,0 +1,6 @@
+[submodule "Vendor/LibVNCServer"]
+	path = Vendor/LibVNCServer
+	url = https://github.com/LibVNC/libvncserver.git
+[submodule "Vendor/TurboVNC"]
+	path = Vendor/TurboVNC
+	url = https://github.com/TurboVNC/turbovnc.git

@@ -1,0 +1,1 @@
+{"name":"desktop-deck-local","owner":{"name":"Desktop Deck"},"plugins":[{"name":"desktop-deck","source":"./plugins/desktop-deck","description":"VNC and SSH control through Desktop Deck"}]}

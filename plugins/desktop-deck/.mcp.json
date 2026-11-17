@@ -1,0 +1,1 @@
+{"mcpServers":{"desktop-deck":{"type":"stdio","command":"/bin/sh","args":["-c","exec \"$HOME/Applications/Desktop Deck.app/Contents/MacOS/desktop-deck-mcp\""]}}}
