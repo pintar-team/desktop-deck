@@ -4,7 +4,7 @@ import DeckCore
 
 @main struct DeckMCP {
     static func main() async throws {
-        let server=Server(name:"desktop-deck",version:"0.3.7",capabilities:.init(tools:.init()))
+        let server=Server(name:"desktop-deck",version:"0.3.8",capabilities:.init(tools:.init()))
         let client=UUID().uuidString
         await server.withMethodHandler(ListTools.self) { _ in
             .init(tools: ToolDefinitions.all.map { definition in
@@ -24,7 +24,7 @@ import DeckCore
                 return .init(content:content,isError:false)
             } catch { return .init(content:[.text(text:error.localizedDescription,annotations:nil,_meta:nil)],isError:true) }
         }
-        try await server.start(transport:StdioTransport())
+        try await server.start(transport:CompatibleStdioTransport())
         await server.waitUntilCompleted()
     }
 }

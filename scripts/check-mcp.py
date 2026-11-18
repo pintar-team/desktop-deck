@@ -25,7 +25,7 @@ def result(wanted):
         if value.get('id')==wanted:return value
     raise RuntimeError(f'MCP response {wanted} timed out')
 try:
-    send({'jsonrpc':'2.0','id':1,'method':'initialize','params':{'protocolVersion':'2025-11-25','capabilities':{},'clientInfo':{'name':'desktop-deck-smoke','version':'1'}}})
+    send({'jsonrpc':'2.0','id':1,'method':'initialize','params':{'protocolVersion':'2025-11-25','capabilities':{'elicitation':{'form':{},'url':{}},'experimental':{'test/extension':{'enabled':True},'test/string':'supported'}},'clientInfo':{'name':'desktop-deck-smoke','version':'1'}}})
     init=result(1);assert 'result' in init,init
     send({'jsonrpc':'2.0','method':'notifications/initialized'})
     send({'jsonrpc':'2.0','id':2,'method':'tools/list','params':{}})
