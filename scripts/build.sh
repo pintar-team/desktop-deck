@@ -5,9 +5,11 @@ ROOT="$PWD"
 export SDKROOT="$(xcode-select -p)/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
 MODE="${1:-release}"
 JPEG_PREFIX="${JPEG_PREFIX:-/opt/homebrew/opt/jpeg-turbo}"
-OPENSSL_PREFIX="${OPENSSL_PREFIX:-/opt/homebrew/opt/openssl@3}"
 test -f "$JPEG_PREFIX/lib/libjpeg.a" || { echo 'Set JPEG_PREFIX to a libjpeg-turbo installation' >&2; exit 1; }
-echo '[1/4] Configuring pinned LibVNCClient'
+echo '[1/5] Preparing pinned OpenSSL with built-in providers'
+OPENSSL_PREFIX="$(bash scripts/build-openssl.sh)"
+export OPENSSL_PREFIX JPEG_PREFIX
+echo '[2/5] Configuring pinned LibVNCClient'
 cmake -S Vendor/LibVNCServer -B .build/native -G Ninja \
   -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
   -DCMAKE_OSX_SYSROOT="$SDKROOT" \
@@ -16,11 +18,14 @@ cmake -S Vendor/LibVNCServer -B .build/native -G Ninja \
   -DCMAKE_INSTALL_PREFIX="$ROOT/.native" -DBUILD_SHARED_LIBS=OFF \
   -DWITH_EXAMPLES=OFF -DWITH_TESTS=OFF -DWITH_OPENSSL=ON -DWITH_GNUTLS=OFF \
   -DOPENSSL_ROOT_DIR="$OPENSSL_PREFIX" -DOPENSSL_USE_STATIC_LIBS=ON \
+  -DOPENSSL_INCLUDE_DIR="$OPENSSL_PREFIX/include" \
+  -DOPENSSL_SSL_LIBRARY="$OPENSSL_PREFIX/lib/libssl.a" \
+  -DOPENSSL_CRYPTO_LIBRARY="$OPENSSL_PREFIX/lib/libcrypto.a" \
   -DWITH_GCRYPT=OFF -DWITH_SASL=OFF -DWITH_PNG=OFF -DWITH_LZO=OFF \
   -DWITH_XCB=OFF -DWITH_FFMPEG=OFF -DWITH_SDL=OFF -DWITH_GTK=OFF \
   -DWITH_QT=OFF -DWITH_LIBSSHTUNNEL=OFF -DWITH_WEBSOCKETS=OFF \
   -DJPEG_INCLUDE_DIR="$JPEG_PREFIX/include" -DJPEG_LIBRARY="$JPEG_PREFIX/lib/libjpeg.a"
-echo '[2/4] Building client library'
+echo '[3/5] Building client library and checking VNC authentication'
 cmake --build .build/native --target vncclient --parallel 4
 mkdir -p .native/include/rfb .native/lib
 cp Vendor/LibVNCServer/include/rfb/*.h .native/include/rfb/
@@ -28,7 +33,11 @@ cp .build/native/include/rfb/rfbconfig.h .native/include/rfb/
 cp .build/native/libvncclient.a .native/lib/
 cp -f "$JPEG_PREFIX/lib/libjpeg.a" .native/lib/
 cp -f "$OPENSSL_PREFIX/lib/libssl.a" "$OPENSSL_PREFIX/lib/libcrypto.a" .native/lib/
-echo '[3/4] Building Swift application and MCP'
+xcrun clang -mmacosx-version-min=26.0 -I Vendor/LibVNCServer/src/common -I .native/include \
+  scripts/check-vnc-crypto.c .native/lib/libvncclient.a .native/lib/libcrypto.a \
+  -o .build/native/check-vnc-crypto
+OPENSSL_CONF=/dev/null OPENSSL_MODULES=/dev/null .build/native/check-vnc-crypto
+echo '[4/5] Building Swift application and MCP'
 swift build -c "$MODE" --jobs 4 \
   -Xswiftc -file-prefix-map -Xswiftc "$HOME=/build" \
   -Xswiftc -file-prefix-map -Xswiftc "$ROOT=/source" \
@@ -65,4 +74,4 @@ if [ "$MODE" = release ]; then
   strip -S -x "$APP/Contents/MacOS/DesktopDeck" "$APP/Contents/MacOS/desktop-deck-mcp"
 fi
 codesign --force --deep --sign - "$APP"
-echo "[4/4] Built $APP"
+echo "[5/5] Built $APP"

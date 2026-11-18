@@ -25,24 +25,24 @@ The app is ad-hoc signed and has not been notarized by Apple. If macOS blocks th
 
 - Apple Silicon Mac running macOS 26 or later.
 - Xcode 26 or later, command-line tools selected and the Xcode license accepted.
-- CMake, Ninja, libjpeg-turbo and OpenSSL 3.
+- CMake, Ninja and libjpeg-turbo. The build downloads and verifies pinned OpenSSL source and compiles it using the macOS system Perl and Make.
 - Python 3 for packaging and the MCP smoke check.
 
-The current build targets arm64/macOS 26 and uses static Homebrew libraries.
+The current build targets arm64/macOS 26 and links libjpeg-turbo and OpenSSL statically.
 
 ## Build and install
 
 ```sh
 git clone --recurse-submodules https://github.com/pintar-team/desktop-deck.git
 cd desktop-deck
-brew install cmake ninja jpeg-turbo openssl@3
+brew install cmake ninja jpeg-turbo
 bash scripts/build.sh release
 mkdir -p "$HOME/Applications"
 ditto 'dist/Desktop Deck.app' "$HOME/Applications/Desktop Deck.app"
 open "$HOME/Applications/Desktop Deck.app"
 ```
 
-For an existing checkout, run `git submodule update --init` before building. The build defaults to `/opt/homebrew/opt/jpeg-turbo` and `/opt/homebrew/opt/openssl@3`; set `JPEG_PREFIX` and `OPENSSL_PREFIX` to use other installations. Native libraries, Swift resources and dependency license notices are included in the app bundle.
+For an existing checkout, run `git submodule update --init` before building. The build defaults to `/opt/homebrew/opt/jpeg-turbo`; set `JPEG_PREFIX` to use another installation. OpenSSL's built-in legacy provider handles VNC authentication without loading an external module. Native libraries, Swift resources and dependency license notices are included in the app bundle.
 
 ## Connect
 

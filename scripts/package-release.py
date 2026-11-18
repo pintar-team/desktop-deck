@@ -16,6 +16,8 @@ def main():
     if receipt.get('application',{}).get('commit')!=commit or receipt['application'].get('dirty'):
         raise SystemExit('Rebuild release from the current clean commit before packaging')
     if receipt['application']['version']!=version:raise SystemExit('Application version does not match its build receipt')
+    if receipt.get('native',{}).get('opensslLegacyProvider')!='built-in':
+        raise SystemExit('Release needs the built-in OpenSSL legacy provider; rebuild using scripts/build.sh')
     print('[1/4] Validating signature, architecture, dependencies and private build paths',flush=True)
     subprocess.run(['codesign','--verify','--deep','--strict',str(app)],check=True,timeout=30)
     for binary in (contents/'MacOS').iterdir():
@@ -29,6 +31,8 @@ def main():
         if path.name in {'workspace.json','control.sock'} or path.suffix in {'.log','.pem','.key','.p12','.pfx'}:
             raise SystemExit('Personal or diagnostic artifact in the app bundle')
         data=path.read_bytes()
+        if b'/opt/homebrew/' in data or b'/usr/local/opt/openssl' in data:
+            raise SystemExit('Homebrew runtime path remains in '+str(path.relative_to(app)))
         if str(Path.home()).encode() in data or str(ROOT).encode() in data:
             raise SystemExit('Local build path remains in '+str(path.relative_to(app)))
     output=ROOT/'dist/release';output.mkdir(exist_ok=True)
