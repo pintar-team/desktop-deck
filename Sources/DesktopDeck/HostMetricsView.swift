@@ -9,6 +9,9 @@ extension HostMetrics {
         return data
     }
 }
+extension DesktopSession {
+    var showsMetricData: Bool {profile.usesSSH && (hostMetrics != nil || !hostMetricsError.isEmpty)}
+}
 struct HostMetricsReadout: View {
     @ObservedObject var session: DesktopSession
     var sidebar=false
@@ -16,7 +19,7 @@ struct HostMetricsReadout: View {
     private func percent(_ value: Double?) -> String {value.map{String(format:"%.0f%%",$0)} ?? "—"}
     private func bytes(_ value: UInt64) -> String {ByteCountFormatter.string(fromByteCount:Int64(clamping:value),countStyle:.file)}
     var body: some View {
-        if enabled,session.profile.usesSSH,session.hostMetrics != nil || !session.hostMetricsError.isEmpty {
+        if enabled,session.showsMetricData {
             TimelineView(.periodic(from:.now,by:30)) {context in
                 let metrics=session.hostMetrics
                 let stale=metrics.map{context.date.timeIntervalSince($0.sampledAt)>90} ?? true

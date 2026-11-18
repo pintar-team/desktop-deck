@@ -19,17 +19,20 @@ public enum LocalRPC {
         return addr
     }
     public static func connect() throws -> Int32 {
+        var addr = try address(socketPath)
         let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw DeckError("Cannot create socket") }
-        var addr = try address(socketPath)
         let result = withUnsafePointer(to: &addr) { p in
             p.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
         }
         guard result == 0 else { Darwin.close(fd); throw DeckError("Desktop Deck is not running. Open the app first.") }
-        var timeout = timeval(tv_sec: 35, tv_usec: 0)
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
-        var one: Int32 = 1; setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, 4)
+        guard configureStream(fd) else {Darwin.close(fd);throw DeckError("Cannot configure control socket")}
         return fd
+    }
+    public static func configureStream(_ fd: Int32) -> Bool {
+        var timeout=timeval(tv_sec:35,tv_usec:0),one:Int32=1
+        let length=socklen_t(MemoryLayout<timeval>.size)
+        return setsockopt(fd,SOL_SOCKET,SO_RCVTIMEO,&timeout,length)==0 && setsockopt(fd,SOL_SOCKET,SO_SNDTIMEO,&timeout,length)==0 && setsockopt(fd,SOL_SOCKET,SO_NOSIGPIPE,&one,4)==0
     }
     public static func write(_ data: Data, fd: Int32) throws {
         let payload = data + Data([10]); var offset=0
@@ -43,7 +46,7 @@ public enum LocalRPC {
     public static func read(fd: Int32) throws -> Data {
         var result=Data(); var buffer=[UInt8](repeating:0,count:65536)
         while result.count < maxBytes {
-            let n=Darwin.read(fd,&buffer,buffer.count)
+            let n=Darwin.read(fd,&buffer,min(buffer.count,maxBytes-result.count))
             guard n > 0 else { throw DeckError("Control connection closed or timed out") }
             if let newline=buffer[..<n].firstIndex(of:10) { result.append(contentsOf:buffer[..<newline]); return result }
             result.append(contentsOf:buffer[..<n])

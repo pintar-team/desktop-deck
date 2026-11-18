@@ -20,7 +20,7 @@ final class ControlServer: @unchecked Sendable {
             guard metadata.st_uid==getuid(),metadata.st_mode & S_IFMT == S_IFSOCK else { throw DeckError("Refusing to replace foreign control path") }
             unlink(LocalRPC.socketPath)
         }
-        fd=socket(AF_UNIX,SOCK_STREAM,0); var addr=try LocalRPC.address(LocalRPC.socketPath)
+        var addr=try LocalRPC.address(LocalRPC.socketPath);fd=socket(AF_UNIX,SOCK_STREAM,0)
         let result=withUnsafePointer(to:&addr) { $0.withMemoryRebound(to:sockaddr.self,capacity:1) { bind(fd,$0,socklen_t(MemoryLayout<sockaddr_un>.size)) } }
         guard result==0,chmod(LocalRPC.socketPath,0o600)==0,listen(fd,8)==0 else { close(fd); throw DeckError("Cannot start local control server") }
         DispatchQueue.global(qos:.utility).async { [self] in acceptLoop() }
@@ -30,9 +30,7 @@ final class ControlServer: @unchecked Sendable {
             lock.lock(); let active=running; lock.unlock(); if !active { return }
             let client=accept(fd,nil,nil); if client<0 { continue }
             var uid: uid_t=0,gid: gid_t=0
-            guard getpeereid(client,&uid,&gid)==0,uid==getuid(),slots.wait(timeout:.now()) == .success else { close(client); continue }
-            var timeout=timeval(tv_sec:35,tv_usec:0); setsockopt(client,SOL_SOCKET,SO_RCVTIMEO,&timeout,socklen_t(MemoryLayout<timeval>.size))
-            var one: Int32=1; setsockopt(client,SOL_SOCKET,SO_NOSIGPIPE,&one,4)
+            guard getpeereid(client,&uid,&gid)==0,uid==getuid(),LocalRPC.configureStream(client),slots.wait(timeout:.now()) == .success else { close(client); continue }
             DispatchQueue.global(qos:.utility).async { [self] in
                 do {
                     let request=try JSONSerialization.jsonObject(with:LocalRPC.read(fd:client)) as? [String:Any] ?? [:]
@@ -71,11 +69,11 @@ final class ControlServer: @unchecked Sendable {
         switch tool {
         case "profiles_manage":return try manageProfiles(a)
         case "workspace_transfer":return try transferConfiguration(a)
-        case "connections_list": return ["version":"0.3.6","keyboardFocus":keyboardFocusRequest?.status ?? "idle","window":WindowLayout.info(NSApp.mainWindow),"profiles":sessions.map { s in
-            ["id":s.id.uuidString,"name":s.profile.name,"state":s.state,"detail":s.detail,"generation":s.connectionRevision,"geometry":s.geometry,"width":s.frame?.width ?? 0,"height":s.frame?.height ?? 0,"ssh":s.profile.usesSSH,"vnc":s.profile.hasVNC,"sessionManager":s.profile.sessionManager,"quality":s.profile.quality,"view":s.surfaceMode,"viewState":s.viewState,"resolutionStatus":s.resolutionStatus,"attempt":s.attemptNumber,"maxAttempts":ConnectionLimits.attempts,"retryIn":s.retryCountdown,"lastError":s.lastError,"hostMetrics":s.hostMetrics?.rpc ?? [:],"metricsError":s.hostMetricsError] as [String:Any]
+        case "connections_list": return ["version":"0.3.7","keyboardFocus":keyboardFocusRequest?.status ?? "idle","window":WindowLayout.info(NSApp.mainWindow),"profiles":sessions.map { s in
+            ["id":s.id.uuidString,"name":s.profile.name,"state":s.state,"detail":s.detail,"generation":s.connectionRevision,"geometry":s.geometry,"width":s.frame?.width ?? 0,"height":s.frame?.height ?? 0,"ssh":s.profile.usesSSH,"vnc":s.profile.hasVNC,"sessionManager":s.profile.sessionManager,"quality":s.profile.quality,"view":s.surfaceMode,"viewState":s.viewState,"resolutionStatus":s.resolutionStatus,"attempt":s.attemptNumber,"maxAttempts":ConnectionLimits.attempts,"retryIn":s.retryCountdown,"lastError":s.lastError,"hostMetrics":s.hostMetrics?.rpc ?? [:],"metricsError":s.hostMetricsError,"activity":s.activity.map{["perSecond":$0.perSecond,"unit":$0.unit,"segments":$0.segments] as [String:Any]} ?? [:]] as [String:Any]
         }]
         case "connection_control":
-            let s=try session(); switch string("action") { case "connect","reconnect": connect(s); case "disconnect": disconnect(s); default: throw DeckError("Expected connect, disconnect or reconnect") }; return ["state":s.state]
+            let s=try session(); switch string("action") {case "connect":connectIfNeeded(s);case "reconnect":connect(s);case "disconnect":disconnect(s);default:throw DeckError("Expected connect, disconnect or reconnect")};return ["state":s.state]
         case "sessions_list":
             let s=try session(); guard s.profile.sessionManager else { throw DeckError("Session Manager not configured") }
             let remote=try await Commands.list(s.profile); s.remoteSessions=remote
@@ -109,10 +107,10 @@ final class ControlServer: @unchecked Sendable {
             guard (1...3).contains(button),x>=0,y>=0,x<(s.frame?.width ?? 0),y<(s.frame?.height ?? 0) else { throw DeckError("Input outside framebuffer or invalid button") }
             switch string("action") {
             case "move": s.pointer(x,y,s.mask)
-            case "click": s.pointer(x,y,1<<(button-1)); s.pointer(x,y,0)
+            case "click": let original=s.mask;s.pointer(x,y,original | (1<<(button-1)));s.pointer(x,y,original)
             case "down": s.pointer(x,y,s.mask | (1<<(button-1)))
             case "up": s.pointer(x,y,s.mask & ~(1<<(button-1)))
-            case "scroll": for _ in 0..<min(abs(int("delta")),40) { s.pointer(x,y,int("delta")>0 ? 8:16); s.pointer(x,y,0) }
+            case "scroll": let delta=int("delta");for _ in 0..<min(delta.magnitude,40) {s.scroll(x,y,up:delta>0)}
             case "key": guard let key=UInt32(exactly:int("key")) else { throw DeckError("Invalid keysym") }; s.key(key,down:a["down"] as? Bool ?? true)
             case "text": guard string("text").utf8.count<=4096 else { throw DeckError("Text exceeds 4096 bytes") }; try s.text(string("text"))
             default: throw DeckError("Unknown input action")
@@ -126,7 +124,7 @@ final class ControlServer: @unchecked Sendable {
             updateWorkspace { if !$0.profiles.contains(s.id) {$0.profiles.append(s.id)}; $0.focused=s.id; $0.focusMode=true }
             if let selection=ViewMode(rawValue:mode) {setViewMode(selection)}
             if a["width"] != nil || a["height"] != nil {try s.requestResolution(width:int("width"),height:int("height"))}
-            s.zoom=min(8,max(0.25,double("zoom",s.zoom))); s.pan=CGPoint(x:double("panX",s.pan.x),y:double("panY",s.pan.y)); return ["zoom":s.zoom]
+            if a["zoom"] != nil {s.zoom=min(8,max(0.25,double("zoom",s.zoom)))};s.pan=CGPoint(x:double("panX",s.pan.x),y:double("panY",s.pan.y));return ["zoom":s.zoom]
         case "terminals_list": return ["terminals":try session().terminals.map(terminalInfo)]
         case "terminal_open":
             let s=try session(); guard s.profile.usesSSH else { throw DeckError("SSH not configured") }
@@ -137,7 +135,7 @@ final class ControlServer: @unchecked Sendable {
             return ["terminal":t.id.uuidString,"generation":t.generation,"text":text,"truncated":full.count>limit,"cursor":t.outputRevision,"changed":int("cursor",-1) != t.outputRevision,"status":t.status,"persistent":t.persistent,"columns":t.view.terminalDimensions.cols,"rows":t.view.terminalDimensions.rows]
         case "terminal_input":
             let t=try terminal(); try t.lease.acquire(client)
-            try t.lease.validate(client,generation:t.generation,expectedGeneration:int("generation",-1),geometry:0,expectedGeometry:0,connected:t.status.hasPrefix("Connected"))
+            try t.lease.validate(client,generation:t.generation,expectedGeneration:int("generation",-1),geometry:0,expectedGeometry:0,connected:t.isOnline)
             let value: String
             switch string("key") { case "": value=string("text"); case "Enter": value="\r"; case "Ctrl-C": value="\u{03}"; default: throw DeckError("Supported terminal keys: Enter, Ctrl-C") }
             guard value.utf8.count<=65536 else { throw DeckError("Input too large") }; t.send(value); return ["accepted":true,"completion":"input sent; command status unknown"]

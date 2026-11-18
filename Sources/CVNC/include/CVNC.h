@@ -5,6 +5,7 @@ typedef struct DeckVNC DeckVNC;
 DeckVNC *deck_vnc_create(void);
 int deck_vnc_connect(DeckVNC *, const char *host, int port, const char *password, int ssh_otp);
 int deck_vnc_poll(DeckVNC *);
+int deck_vnc_received_bytes(DeckVNC *, uint64_t *total);
 int deck_vnc_width(DeckVNC *);
 int deck_vnc_height(DeckVNC *);
 const void *deck_vnc_pixels(DeckVNC *);

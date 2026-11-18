@@ -19,6 +19,12 @@ final class VNCWorker: @unchecked Sendable {
     var onResizeResult: ((Int)->Void)?
     var onClipboard: ((String)->Void)?
     var onClipboardSent: ((Int)->Void)?
+    var receivedBytes: UInt64? {
+        lock.lock(); defer { lock.unlock() }
+        var total: UInt64=0
+        guard let handle, !cancelled, deck_vnc_received_bytes(handle,&total) != 0 else {return nil}
+        return total
+    }
     func enqueue(_ event: Event) {
         lock.lock(); defer { lock.unlock() }
         guard !cancelled else { return }

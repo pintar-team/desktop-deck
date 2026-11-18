@@ -36,8 +36,7 @@ struct WorkspaceView: View {
             }
             VStack(spacing:0) {
                 if toolbarVisible {
-                    ScrollView(.horizontal,showsIndicators:false){toolbar.frame(minWidth:contentWidth)}
-                        .frame(height:30).zIndex(2).transition(.move(edge:.top).combined(with:.opacity))
+                    toolbar.zIndex(2).transition(.move(edge:.top).combined(with:.opacity))
                 }
                 if !model.error.isEmpty {errorBanner}
                 content.clipped().zIndex(0)
@@ -81,7 +80,7 @@ struct WorkspaceView: View {
                 VStack(spacing:0) {
                     DesktopPanel(session:s,model:model)
                     if showThumbnails {ScrollView(.horizontal) {
-                        HStack(spacing:0){ForEach(model.visible){DesktopTile(session:$0,model:model,compact:true).frame(width:180,height:112)}}
+                        HStack(spacing:0){ForEach(model.visible){DesktopTile(session:$0,model:model).frame(width:180,height:112)}}
                     }.frame(height:112).background(DeckTheme.background)}
                 }
             }
@@ -115,15 +114,17 @@ struct WorkspaceView: View {
     private var toolbar: some View {
         HStack(spacing:5) {
             Button {sidebarVisible.toggle()} label:{Image(systemName:"sidebar.left")}.help("Connections sidebar")
+            ModeButtons(mode:model.viewMode,supportsSSH:model.focused?.profile.usesSSH ?? false,supportsVNC:model.focused?.profile.hasVNC ?? false,tint:activeTint,select:{model.setViewMode($0,focusKeyboard:true)})
+            GeometryReader { available in ScrollView(.horizontal,showsIndicators:false) {HStack(spacing:5) {
             if model.saved.workspaces.count>1 {
-                ScrollView(.horizontal,showsIndicators:false){HStack(spacing:2){ForEach(model.saved.workspaces){p in
-                    Button {model.saved.selectedWorkspace=p.id;model.updateRenderingRates();model.persist();model.requestKeyboardFocus()} label:{
-                        Text(p.name).font(.system(size:11,weight:.medium)).lineLimit(1).padding(.horizontal,6).frame(height:22)
-                            .background(p.id==model.saved.selectedWorkspace ? activeTint.opacity(0.16):.clear,in:RoundedRectangle(cornerRadius:3))
-                    }.buttonStyle(.plain)
-                }}}.frame(maxWidth:220)
+                ViewThatFits(in:.horizontal) {
+                    HStack(spacing:2){ForEach(model.saved.workspaces){p in
+                        Button {selectWorkspace(p)} label:{Text(p.name).lineLimit(1).padding(.horizontal,6).frame(height:22)
+                            .background(p.id==model.saved.selectedWorkspace ? activeTint.opacity(0.16):.clear,in:RoundedRectangle(cornerRadius:3))}.buttonStyle(.plain)
+                    }}.fixedSize()
+                    Menu {ForEach(model.saved.workspaces){p in Button(p.name){selectWorkspace(p)}}} label:{Label("Workspaces",systemImage:"square.stack")}
+                }.frame(maxWidth:min(220,available.size.width*0.3),alignment:.leading)
             }
-            ModeButtons(mode:model.viewMode,supportsSSH:model.focused?.profile.usesSSH ?? false,supportsVNC:model.focused?.profile.hasVNC ?? false,tint:model.focused?.tint ?? DeckTheme.accent,select:{model.setViewMode($0,focusKeyboard:true)})
             if model.viewMode == .overview {
                 Picker("Grid columns",selection:Binding(get:{model.workspace.gridMode ?? 0},set:{v in model.updateWorkspace{$0.gridMode=v}})) {
                     Text("Fit all").tag(0);ForEach([2,3,4,5],id:\.self){Text("\($0) × N").tag($0)}
@@ -132,7 +133,8 @@ struct WorkspaceView: View {
             } else if let s=model.focused {
                 FocusedConnectionControls(session:s,model:model)
             }
-            Rectangle().fill(DeckTheme.border).frame(width:1,height:14)
+            }.frame(minWidth:available.size.width,minHeight:30,alignment:.leading)}}
+            Rectangle().fill(DeckTheme.border).frame(width:1,height:14).allowsHitTesting(false)
             Toggle(isOn:$showThumbnails){Image(systemName:"film")}.toggleStyle(.button).disabled(model.viewMode == .overview)
                 .help("Show other desktops · independent of view mode")
             Button {model.saved.workspaces.append(WorkspacePreset(name:"Workspace \(model.saved.workspaces.count+1)",profiles:[]));model.saved.selectedWorkspace=model.saved.workspaces.last?.id;model.persist();editPreset=true} label:{Image(systemName:"plus")}.help("New workspace")
@@ -142,7 +144,7 @@ struct WorkspaceView: View {
                 Toggle("Soften preview transitions",isOn:$previewSmoothing)
                 Toggle("Host CPU and disk · SSH",isOn:$showHostMetrics)
                 Divider();Button("Import configuration…"){model.importConfigurationFile()};Button("Export configuration…"){model.exportConfiguration()}
-                Divider();Button("Connect workspace"){model.visible.filter{!$0.isOnline}.forEach{model.connect($0)}}
+                Divider();Button("Connect workspace"){model.visible.forEach(model.connectIfNeeded)}
                 Button("Disconnect workspace"){model.visible.forEach{model.disconnect($0)}}
             } label:{Image(systemName:"ellipsis")}.help("Workspace actions and preferences")
             Button {model.toggleFullScreen()} label:{Image(systemName:model.isFullScreen ? "arrow.down.right.and.arrow.up.left":"arrow.up.left.and.arrow.down.right")}.help("Full screen · ⌃⌘F")
@@ -150,13 +152,16 @@ struct WorkspaceView: View {
         }.buttonStyle(.borderless).controlSize(.mini).font(.system(size:12))
             .foregroundStyle(activeTint).tint(activeTint)
             .padding(.leading,chromeMode=="normal" && !sidebarVisible && !model.isFullScreen ? 80:5).padding(.trailing,5).frame(height:30).background(DeckTheme.panel)
-            .overlay(alignment:.bottom){activeTint.opacity(0.2).frame(height:1)}
+            .overlay(alignment:.bottom){activeTint.opacity(0.2).frame(height:1).allowsHitTesting(false)}
             .onHover {inside in
                 hideTask?.cancel()
                 if !inside && chromeMode != "normal" && !pinnedChrome {
                     hideTask=Task {try? await Task.sleep(nanoseconds:1_500_000_000);if !Task.isCancelled{withAnimation{revealChrome=false}}}
                 }
             }
+    }
+    private func selectWorkspace(_ preset: WorkspacePreset) {
+        model.saved.selectedWorkspace=preset.id;model.updateRenderingRates();model.persist();model.requestKeyboardFocus()
     }
     private var errorBanner: some View {
         HStack {Text(model.error).font(.caption).textSelection(.enabled);Spacer();Button{model.error=""}label:{Image(systemName:"xmark")}}.padding(6).background(.orange.opacity(0.12))

@@ -2,6 +2,21 @@ import XCTest
 @testable import DeckCore
 
 final class CoreTests: XCTestCase {
+    func testActivitySeparatesIdleFromUnavailableAndResetsAcrossConnections() {
+        var meter=ActivitySampler()
+        let desktop=ActivitySource.desktop(1),terminal=ActivitySource.terminal(UUID(),1)
+        XCTAssertNil(meter.sample(source:desktop,total:8192,at:10))
+        let burst=meter.sample(source:desktop,total:8192+32768,at:12)
+        XCTAssertEqual(burst?.perSecond,16384);XCTAssertEqual(burst?.segments,3)
+        XCTAssertEqual(meter.sample(source:desktop,total:40960,at:13)?.segments,0)
+        XCTAssertNil(meter.sample(source:.desktop(2),total:110000,at:14))
+        XCTAssertNil(meter.sample(source:terminal,total:1000,at:15))
+        XCTAssertEqual(meter.sample(source:terminal,total:1050,at:16)?.segments,5)
+        XCTAssertNil(meter.sample(source:terminal,total:1051,at:45))
+        XCTAssertNil(meter.sample(source:terminal,total:1,at:46))
+        XCTAssertNil(meter.sample(source:nil,total:nil,at:47))
+        XCTAssertNil(meter.sample(source:terminal,total:99,at:48))
+    }
     func testDuplicateKeepsServerVerificationButGetsIndependentIdentity() {
         var source=Profile(host:"localhost",sshHost:"localhost",hostKeyAlias:"localhost")
         source.autoConnect=true;source.tintHex="7AC8FF";source.autoTintHex="FF7700"
@@ -126,6 +141,28 @@ final class CoreTests: XCTestCase {
             XCTAssertTrue((tool.schema["required"] as! [String]).contains("generation"))
         }
         XCTAssertEqual(Set(ToolDefinitions.all.map(\.name)).count,ToolDefinitions.all.count)
+    }
+    func testCapturedDragCanReleaseAtFramebufferEdge() {
+        let transform=ViewTransform(width:800,height:600,frameWidth:1600,frameHeight:900)
+        XCTAssertNil(transform.remote(x:-50,y:50))
+        XCTAssertEqual(transform.remote(x:-50,y:50,clamp:true)?.0,0)
+        XCTAssertEqual(transform.remote(x:820,y:580,clamp:true)?.1,899)
+        XCTAssertNil(ViewTransform(width:0,height:0,frameWidth:1600,frameHeight:900).remote(x:4,y:5,clamp:true))
+    }
+    func testPixelZoomUsesDrawableInsteadOfLogicalSize() {
+        let transform=ViewTransform(width:800,height:600,frameWidth:1280,frameHeight:800,zoom:3)
+        XCTAssertEqual(transform.pixelZoom(backingScale:2),0.8)
+        XCTAssertEqual(transform.pixelZoom(backingScale:1),1.6)
+        XCTAssertNil(ViewTransform(width:0,height:0,frameWidth:1280,frameHeight:800).pixelZoom(backingScale:2))
+    }
+    func testSplitFitsAfterWindowShrinksOrFilmstripOpens() {
+        for available in [0.0,180,430,580,1000] {
+            let room=max(0,available-SplitLayout.tabBarHeight-SplitLayout.dividerHeight)
+            for preferred in [80.0,260,700] {
+                let terminal=SplitLayout.terminalHeight(preferred:preferred,available:available)
+                XCTAssertGreaterThanOrEqual(terminal,min(120,room/2));XCTAssertGreaterThanOrEqual(room-terminal,min(120,room/2))
+            }
+        }
     }
     func testCompactGridContainsEveryConnectionWithFixedColumns() {
         for count in 1...50 {

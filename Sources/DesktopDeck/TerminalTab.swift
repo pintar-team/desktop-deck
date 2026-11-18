@@ -6,6 +6,8 @@ import DeckCore
 final class TerminalTiming: @unchecked Sendable {
     private let lock=NSLock()
     private var inputAt: TimeInterval?
+    private var outputBatches=0
+    var revision: Int {lock.lock();defer{lock.unlock()};return outputBatches}
     private var eventDelay: Double?,echoDelay: Double?
     func input(eventTime: TimeInterval?=nil) {
         let now=ProcessInfo.processInfo.systemUptime
@@ -17,6 +19,7 @@ final class TerminalTiming: @unchecked Sendable {
         let now=ProcessInfo.processInfo.systemUptime
         lock.lock();defer{lock.unlock()}
         if let inputAt,now-inputAt<2 {echoDelay=(now-inputAt)*1000}
+        outputBatches += 1
         inputAt=nil
     }
     func reset() {lock.lock();inputAt=nil;eventDelay=nil;echoDelay=nil;lock.unlock()}
@@ -44,10 +47,17 @@ final class TerminalTiming: @unchecked Sendable {
     let id: UUID
     let profile: Profile
     @Published var title="Terminal"
-    @Published var status="Disconnected"
+    struct Connection: Equatable {
+        let indicator: ConnectionIndicator, message: String
+    }
+    @Published private(set) var connection=Connection(indicator:.offline,message:"Disconnected")
+    var status: String {connection.message}
+    var isOnline: Bool {connection.indicator == .online}
+    private func report(_ indicator: ConnectionIndicator,_ message: String) {connection=Connection(indicator:indicator,message:message)}
+    func reportFailure(_ message: String) {desired=false;report(.attention,message)}
     @Published var persistent=false
     @Published var generation=0
-    var outputRevision=0
+    var outputRevision: Int {view.timing.revision}
     let view=DeckTerminalView(frame:NSRect(x:0,y:0,width:800,height:260))
     var lease=InputLease()
     var desired=false
@@ -62,7 +72,7 @@ final class TerminalTiming: @unchecked Sendable {
         view.processDelegate=self; view.font=NSFont.monospacedSystemFont(ofSize:13,weight:.regular)
         view.human = { [weak self] in self?.lease.human() }
         let timing=view.timing
-        view.setProcessOutputHandler { [weak self,timing] in timing.output();Task { @MainActor in self?.outputRevision += 1 } }
+        view.setProcessOutputHandler { timing.output() }
         eventMonitor=NSEvent.addLocalMonitorForEvents(matching:[.keyDown,.leftMouseDown,.rightMouseDown]) { [weak self] event in
             if let self,event.window===view.window,let first=event.window?.firstResponder as? NSView,
                first===view || first.isDescendant(of:view) {
@@ -73,15 +83,15 @@ final class TerminalTiming: @unchecked Sendable {
         }
     }
     func connect() {
-        guard profile.usesSSH else { status="SSH is not configured for this profile"; return }
+        guard profile.usesSSH else { reportFailure("SSH is not configured for this profile"); return }
         desired=true; reconnect?.cancel(); generation += 1
-        let g=generation; status="Connecting"
+        let g=generation; report(.connecting,"Connecting")
         if processActive {
             stopping=true;view.terminate()
             reconnect=Task { [weak self] in
                 try? await Task.sleep(nanoseconds:5_000_000_000)
                 guard let self,!Task.isCancelled,desired,processActive else {return}
-                desired=false;status="SSH is still closing · retry"
+                reportFailure("SSH is still closing · retry")
             }
             return
         }
@@ -97,18 +107,18 @@ final class TerminalTiming: @unchecked Sendable {
                 persistent=useTmux;processActive=true;view.timing.reset()
                 let command=persistent ? "exec tmux -L desktop-deck new-session -A -s \(Shell.quote(tmuxName))" : "exec \"${SHELL:-/bin/sh}\" -l"
                 view.startProcess(executable:"/usr/bin/ssh",args:Shell.sshArguments(profile,interactive:true)+["--",profile.sshHost,command],environment:["TERM=xterm-256color","LANG=en_US.UTF-8","PATH=/usr/bin:/bin:/usr/sbin:/sbin"])
-                status=persistent ? "Connected · persistent" : "Connected · plain SSH"
+                report(.online,persistent ? "Connected · persistent" : "Connected · plain SSH")
             } catch {
                 guard !Task.isCancelled,generation==g else {return}
-                desired=false;status=error.localizedDescription
+                reportFailure(error.localizedDescription)
             }
         }
     }
-    func detach() { desired=false; generation += 1; reconnect?.cancel(); stopping=processActive; view.terminate(); status="Detached"; lease=InputLease() }
+    func detach() { desired=false; generation += 1; reconnect?.cancel(); stopping=processActive; view.terminate(); report(.offline,"Detached"); lease=InputLease() }
     func end() async throws {
         detach()
         if persistent { _=try await Commands.ssh(profile,"tmux -L desktop-deck kill-session -t \(Shell.quote(tmuxName))") }
-        status="Ended"
+        report(.offline,"Ended")
     }
     func send(_ text: String) { view.timing.input();view.send(source:view,data:Array(text.utf8)[...]) }
     func read(limit: Int) -> String {
@@ -128,13 +138,13 @@ final class TerminalTiming: @unchecked Sendable {
         lease=InputLease(); generation += 1
         guard desired else { return }
         if !persistent {desired=false}
-        status=persistent ? "Reconnecting" : "Disconnected · reconnect opens a new shell"
+        report(persistent ? .connecting:(exitCode==0 ? .offline:.attention),persistent ? "Reconnecting":"Disconnected · reconnect opens a new shell")
         if persistent {
             let delay=RetryPolicy.delay(attempt:retry,jitter:1); retry += 1
             reconnect=Task { [weak self] in try? await Task.sleep(nanoseconds:UInt64(delay*1e9)); guard let self,!Task.isCancelled,desired else { return }; connect() }
         }
     }
-    func processFailedToStart(source: TerminalView,error: LocalProcessError) {processActive=false;stopping=false;desired=false;status="SSH process could not start"}
+    func processFailedToStart(source: TerminalView,error: LocalProcessError) {processActive=false;stopping=false;reportFailure("SSH process could not start")}
     deinit { if let eventMonitor { NSEvent.removeMonitor(eventMonitor) } }
 }
 @MainActor final class TerminalContainer: NSView {

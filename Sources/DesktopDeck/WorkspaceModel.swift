@@ -32,10 +32,10 @@ import CVNC
     var selectedTab: TerminalTab? {terminals.first{$0.id==selectedTerminal}}
     var state: String {
         if profile.hasVNC {return phase.label}
-        let status=selectedTab?.status ?? "Disconnected"
-        return status.hasPrefix("Connected") ? "Connected":status
+        return isOnline ? "Connected":(selectedTab?.status ?? "Disconnected")
     }
-    var isOnline: Bool {profile.hasVNC ? active:state=="Connected"}
+    var indicator: ConnectionIndicator {profile.hasVNC ? phase.indicator:(selectedTab?.connection.indicator ?? .offline)}
+    var isOnline: Bool {indicator == .online}
     var wantsConnection: Bool {profile.hasVNC ? desired:(selectedTab?.desired ?? false)}
     var connectionSummary: String {
         if !profile.hasVNC {return state}
@@ -46,6 +46,25 @@ import CVNC
     @Published var detail=""
     @Published var hostMetrics: HostMetrics?
     @Published var hostMetricsError=""
+    private var activitySampler=ActivitySampler()
+    @Published private var sampledActivity: ActivityReading?
+    private var activitySource: ActivitySource? {
+        guard isOnline else {return nil}
+        if profile.hasVNC {return .desktop(connectionRevision)}
+        return selectedTab.map { .terminal($0.id,$0.generation) }
+    }
+    var activity: ActivityReading? {sampledActivity?.source == activitySource ? sampledActivity:nil}
+    func sampleActivity(at now: TimeInterval) {
+        let source=activitySource
+        let total: UInt64?
+        switch source {
+        case .desktop: total=worker?.receivedBytes
+        case .terminal: total=selectedTab.map { UInt64($0.outputRevision) }
+        case nil: total=nil
+        }
+        let next=activitySampler.sample(source:source,total:total,at:now)
+        if next != sampledActivity {sampledActivity=next}
+    }
     @Published var frame: Frame?
     @Published var geometry=0
     @Published var generation=0
@@ -77,18 +96,17 @@ import CVNC
     var active: Bool {profile.hasVNC && phase == .connected}
     var tint: Color {DeckTheme.color(profile.tintHex ?? profile.autoTintHex ?? DeckTheme.palette[0].hex)}
     var tooltip: String {
-        if !profile.hasVNC {return ["\(profile.name) · \(connectionSummary)",selectedTab?.status ?? ""].filter{!$0.isEmpty}.joined(separator:"\n")}
-        return ["\(profile.name) · \(connectionSummary)",detail,active || lastError==detail ? "":lastError].filter{!$0.isEmpty}.joined(separator:"\n")
-    }
-    var diagnosticTooltip: String {
-        var lines=[state,detail]
-        if let frame {lines.append("\(frame.width) × \(frame.height) · \(profile.quality)")}
-        return lines.filter{!$0.isEmpty}.joined(separator:"\n")
+        let summary=connectionSummary
+        var lines=["\(profile.name) · \(summary)"]
+        let details=profile.hasVNC ? [detail,active ? "":lastError]:[selectedTab?.status ?? ""]
+        for item in details.map({$0.trimmingCharacters(in:.whitespacesAndNewlines)}) where !item.isEmpty && item != summary && !lines.contains(item) {lines.append(item)}
+        return lines.joined(separator:"\n")
     }
     func humanInput(invalidatePendingPaste: Bool=true) {if invalidatePendingPaste {humanActionRevision += 1};if lease.owner != nil {releaseInput()}; lease.human() }
     func releaseInput() {
         for key in pressed { worker?.enqueue(.key(key,false)) }; pressed.removeAll()
-        heldModifiers.removeAll();mask=0; worker?.enqueue(.pointer(lastPoint.0,lastPoint.1,0))
+        heldModifiers.removeAll()
+        if mask != 0 {mask=0;worker?.enqueue(.pointer(lastPoint.0,lastPoint.1,0))}
     }
     func key(_ value: UInt32,down: Bool) {
         guard active else { return }
@@ -99,6 +117,9 @@ import CVNC
     func pointer(_ x: Int,_ y: Int,_ buttons: Int) {
         guard active,let frame,x>=0,y>=0,x<frame.width,y<frame.height else { return }
         mask=buttons; lastPoint=(x,y); worker?.enqueue(.pointer(x,y,buttons))
+    }
+    func scroll(_ x: Int,_ y: Int,up: Bool) {
+        let original=mask;pointer(x,y,original | (up ? 8:16));pointer(x,y,original)
     }
     func text(_ text: String) throws {
         var commands=[VNCWorker.Event]()
@@ -187,7 +208,7 @@ import CVNC
     var workspaceIndex: Int { saved.workspaces.firstIndex(where:{$0.id==saved.selectedWorkspace}) ?? 0 }
     var workspace: WorkspacePreset { saved.workspaces[workspaceIndex] }
     var visible: [DesktopSession] {
-        workspace.profiles.compactMap { id in sessions.first{$0.id==id} }.filter { search.isEmpty || $0.profile.name.localizedCaseInsensitiveContains(search) || $0.profile.group.localizedCaseInsensitiveContains(search) }
+        workspace.profiles.compactMap { id in sessions.first{$0.id==id} }
     }
     var focused: DesktopSession? { sessions.first{$0.id==workspace.focused} ?? visible.first }
     var viewMode: ViewMode {
@@ -254,8 +275,11 @@ import CVNC
         network.start(queue:DispatchQueue(label:"dev.desktop-deck.network"))
         leaseTimer=Timer.scheduledTimer(withTimeInterval:1,repeats:true) { [weak self] _ in
             Task { @MainActor in guard let self else { return }
+                let now=ProcessInfo.processInfo.systemUptime
                 for s in self.sessions {
-                    s.retryCountdown=max(0,Int(ceil(s.retryAt?.timeIntervalSinceNow ?? 0)))
+                    let countdown=max(0,Int(ceil(s.retryAt?.timeIntervalSinceNow ?? 0)))
+                    if s.retryCountdown != countdown {s.retryCountdown=countdown}
+                    s.sampleActivity(at:now)
                     if s.imageUploading {s.lease.human()}
                 }
                 for s in self.sessions where s.lease.owner != nil && Date() >= s.lease.expiry { s.releaseInput(); s.lease=InputLease() }
@@ -314,7 +338,7 @@ import CVNC
     private func makeTerminal(_ s: DesktopSession,id: UUID=UUID(),profile: Profile?=nil) -> TerminalTab {
         let tab=TerminalTab(profile:profile ?? s.profile,id:id)
         tab.view.feedback = {[weak s] message in s?.showFeedback(message)}
-        s.terminalObservations[tab.id]=tab.$status.removeDuplicates().sink {[weak self,weak s] _ in s?.objectWillChange.send();self?.objectWillChange.send()}
+        s.terminalObservations[tab.id]=tab.$connection.removeDuplicates().sink {[weak self,weak s] _ in s?.objectWillChange.send();self?.objectWillChange.send()}
         return tab
     }
     func editProfile(_ s: DesktopSession?=nil) {profileDraft=ProfileDraft(profile:s?.profile ?? Profile())}
@@ -323,7 +347,7 @@ import CVNC
     }
     var sidebarSessions: [DesktopSession] {
         let order=workspace.profiles+sessions.map(\.id).filter{!workspace.profiles.contains($0)}
-        return order.compactMap{id in sessions.first{$0.id==id}}.filter{search.isEmpty || $0.profile.name.localizedCaseInsensitiveContains(search)}
+        return order.compactMap{id in sessions.first{$0.id==id}}.filter{search.isEmpty || $0.profile.name.localizedCaseInsensitiveContains(search) || $0.profile.group.localizedCaseInsensitiveContains(search)}
     }
     func moveSidebar(from offsets: IndexSet,to destination: Int) {
         var order=sidebarSessions.map(\.id);order.move(fromOffsets:offsets,toOffset:destination)

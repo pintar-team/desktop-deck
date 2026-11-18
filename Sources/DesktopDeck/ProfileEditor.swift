@@ -75,7 +75,7 @@ struct ProfileEditor: View {
             Label(title,systemImage:icon).font(.system(size:12,weight:.semibold)).foregroundStyle(active ? tint:.secondary)
             content()
         }.padding(12).background(DeckTheme.background.opacity(0.6),in:RoundedRectangle(cornerRadius:7))
-            .overlay(RoundedRectangle(cornerRadius:7).strokeBorder(active ? tint.opacity(0.45):DeckTheme.border.opacity(0.4),lineWidth:1))
+            .overlay(RoundedRectangle(cornerRadius:7).strokeBorder(active ? tint.opacity(0.45):DeckTheme.border.opacity(0.4),lineWidth:1).allowsHitTesting(false))
     }
     private func capability(_ icon: String,_ title: String,_ active: Bool) -> some View {
         Label(title,systemImage:icon).font(.system(size:10,weight:.medium)).foregroundStyle(active ? tint:.secondary.opacity(0.4))

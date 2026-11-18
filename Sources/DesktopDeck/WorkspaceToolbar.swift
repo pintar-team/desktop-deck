@@ -13,6 +13,7 @@ struct ModeButtons: View {
                 Image(systemName:item.symbol).font(.system(size:12,weight:.medium)).frame(width:27,height:23)
                     .foregroundStyle(tint.opacity(mode==item ? 1:0.45))
                     .background(mode==item ? tint.opacity(0.16):.clear,in:RoundedRectangle(cornerRadius:3))
+                    .contentShape(Rectangle())
             }.buttonStyle(.plain).disabled((item.showsTerminal && !supportsSSH) || (item.showsDesktop && !supportsVNC)).help(item.title)
                 .accessibilityLabel(item.title).accessibilityValue(mode==item ? "Selected":"")
         }}.fixedSize()
@@ -23,7 +24,7 @@ struct FocusedConnectionControls: View {
     @ObservedObject var model: WorkspaceModel
     var body: some View {
       HStack(spacing:5) {
-        Text(session.profile.name).font(.system(size:11,weight:.semibold)).foregroundStyle(session.tint).lineLimit(1)
+        Text(session.profile.name).font(.system(size:11,weight:.semibold)).foregroundStyle(session.tint).lineLimit(1).frame(maxWidth:150,alignment:.leading).fixedSize(horizontal:true,vertical:false).help(session.profile.name)
         if session.profile.sessionManager {sessionMenu.fixedSize()}
         Spacer(minLength:4)
         HStack(spacing:5) {
@@ -31,7 +32,8 @@ struct FocusedConnectionControls: View {
                 RemoteInputMenu(session:session).fixedSize()
                 Menu {
                     Button("Fit entire desktop"){session.zoom=1;session.pan = .zero}
-                    Button("100% pixels") {if let f=session.frame {session.zoom=1/min(session.viewport.width/Double(f.width),session.viewport.height/Double(f.height));session.pan = .zero}}
+                    Button("100% pixels") {if let view=session.inputView,session.frame != nil,let window=view.window,
+                        let zoom=view.transform.pixelZoom(backingScale:window.backingScaleFactor) {session.zoom=zoom;session.pan = .zero}}
                     ForEach([1.5,2,3,4],id:\.self){z in Button("\(Int(z*100))% of fit"){session.zoom=z}}
                 } label:{Image(systemName:"plus.magnifyingglass")}.help("Zoom").fixedSize()
                 Picker("Quality",selection:$session.profile.quality){Text("Auto").tag("auto");Text("Text").tag("text");Text("Balanced").tag("balanced");Text("Economy").tag("economy")}

@@ -21,11 +21,14 @@ import DeckCore
 }
 
 @MainActor extension WorkspaceModel {
+    func connectIfNeeded(_ session: DesktopSession) {
+        if !session.isOnline && (!session.wantsConnection || session.needsAction) {connect(session)}
+    }
     func disconnect(_ s: DesktopSession) {
         if !s.profile.hasVNC {s.terminals.forEach{$0.detach()}}
         s.cancelResolution();s.resetClipboard();s.desired=false;s.needsAction=false;s.generation += 1;s.task?.cancel();s.task=nil
         s.releaseInput();s.worker?.stop();s.worker=nil;s.tunnel?.stop();s.tunnel=nil
-        s.phase = .disconnected;s.detail="";s.retryAt=nil;s.lease=InputLease()
+        s.phase = .disconnected;s.detail="";s.lastError="";s.retryAt=nil;s.lease=InputLease()
     }
     func connect(_ s: DesktopSession) {
         if !s.profile.hasVNC {
@@ -33,7 +36,7 @@ import DeckCore
             else {_=openTerminal(s,present:false)}
             return
         }
-        disconnect(s);s.desired=true;s.needsAction=false;s.attemptNumber=0;s.lastError=""
+        disconnect(s);s.desired=true;s.attemptNumber=0
         let generation=s.generation
         s.task=Task { [weak self,weak s] in
             guard let self,let s else {return}
@@ -65,14 +68,14 @@ import DeckCore
                     watchdog?.cancel();releasePermit()
                     guard s.generation==generation,s.desired,!Task.isCancelled else {return}
                     s.worker?.stop();s.worker=nil;s.tunnel?.stop();s.tunnel=nil;s.releaseInput();s.resetClipboard();s.lease=InputLease()
-                    let message=timedOut ? s.lastError:error.localizedDescription
+                    let message=(timedOut ? s.lastError:error.localizedDescription).trimmingCharacters(in:.whitespacesAndNewlines)
                     s.lastError=message;s.detail=message
                     let lowered=message.lowercased()
                     if ["permission denied","host key verification","identification has changed","invalid connection","authentication rejected","pinned session missing"].contains(where:lowered.contains) {s.needsAction=true}
                     if s.needsAction {s.phase = .needsAttention;return}
                     if let connected=s.connectedAt,Date().timeIntervalSince(connected)>=ConnectionLimits.stableSeconds {s.attemptNumber=0}
                     if s.attemptNumber>=ConnectionLimits.attempts {
-                        s.phase = .failed;s.needsAction=true;s.detail="\(message) · \(ConnectionLimits.attempts) attempts exhausted";return
+                        s.phase = .failed;s.needsAction=true;s.detail="Automatic retries exhausted";return
                     }
                     let delay=RetryPolicy.delay(attempt:max(0,s.attemptNumber-1),jitter:Double.random(in:0.8...1.2))
                     s.retryAt=Date().addingTimeInterval(delay);s.phase = .backoff

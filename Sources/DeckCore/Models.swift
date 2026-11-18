@@ -158,9 +158,17 @@ public struct ViewTransform {
         self.zoom=zoom; self.panX=panX; self.panY=panY
     }
     public var scale: Double { min(width/max(frameWidth,1), height/max(frameHeight,1)) * zoom }
+    public func pixelZoom(backingScale: Double) -> Double? {
+        let fit=min(width/max(frameWidth,1),height/max(frameHeight,1))*backingScale
+        guard frameWidth>0,frameHeight>0,fit>0,fit.isFinite else {return nil}
+        return 1/fit
+    }
     public var origin: (Double,Double) { ((width-frameWidth*scale)/2+panX, (height-frameHeight*scale)/2+panY) }
-    public func remote(x: Double, y: Double) -> (Int,Int)? {
+    public func remote(x: Double, y: Double,clamp: Bool=false) -> (Int,Int)? {
+        guard width>0,height>0,frameWidth>=1,frameHeight>=1,scale>0 else {return nil}
         let o=origin, rx=(x-o.0)/scale, ry=(y-o.1)/scale
+        guard rx.isFinite,ry.isFinite else {return nil}
+        if clamp {return (Int(min(frameWidth-1,max(0,rx))),Int(min(frameHeight-1,max(0,ry))))}
         guard rx >= 0, ry >= 0, rx < frameWidth, ry < frameHeight else { return nil }
         return (Int(rx), Int(ry))
     }

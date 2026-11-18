@@ -1,5 +1,14 @@
 import Foundation
 
+public enum SplitLayout {
+    public static let dividerHeight=7.0, tabBarHeight=24.0
+    public static func terminalHeight(preferred: Double, available: Double) -> Double {
+        let space=max(0,available-dividerHeight-tabBarHeight)
+        let minimum=min(120,space/2)
+        return min(space-minimum,max(minimum,preferred))
+    }
+}
+
 public enum ViewMode: String,CaseIterable,Identifiable {
     case overview,desktop,terminal,split
     public var id: String {rawValue}
@@ -12,8 +21,18 @@ public enum ViewMode: String,CaseIterable,Identifiable {
     public var showsDesktop: Bool {self == .desktop || self == .split}
     public var showsTerminal: Bool {self == .terminal || self == .split}
 }
+public enum ConnectionIndicator: Equatable {case online,offline,connecting,attention}
+
 public enum ConnectionPhase: String {
     case disconnected,queued,waitingNetwork,listing,authorizing,tunneling,handshake,synchronizing,connected,backoff,failed,needsAttention
+    public var indicator: ConnectionIndicator {
+        switch self {
+        case .connected:return .online
+        case .disconnected:return .offline
+        case .failed,.needsAttention:return .attention
+        case .queued,.waitingNetwork,.listing,.authorizing,.tunneling,.handshake,.synchronizing,.backoff:return .connecting
+        }
+    }
     public var label: String {
         switch self {
         case .disconnected:return "Disconnected"

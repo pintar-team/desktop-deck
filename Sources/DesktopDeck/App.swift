@@ -19,7 +19,7 @@ import DeckCore
                 Button("Export configuration…"){model.exportConfiguration()}
             }
             CommandMenu("Connection") {
-                Button("Connect all in workspace") { model.visible.forEach{model.connect($0)} }
+                Button("Connect all in workspace") { model.visible.forEach(model.connectIfNeeded) }
                 Button("Disconnect workspace") { model.visible.forEach{model.disconnect($0)} }
                 Button("Full screen"){model.toggleFullScreen()}.keyboardShortcut("f",modifiers:[.control,.command])
                 Divider()

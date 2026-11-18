@@ -7,6 +7,7 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <sys/socket.h>
+#include <netinet/tcp.h>
 struct DeckVNC { rfbClient *client; char *password; void *pixels; int dirty; int auth_failed; int interrupt_fd; int cancelled; pthread_mutex_t mutex; char *clipboard; int clipboard_length; int clipboard_utf8; int clipboard_dirty; int clipboard_caps_sent; };
 static _Thread_local DeckVNC *connecting;
 static void quiet(const char *format, ...) {
@@ -88,6 +89,16 @@ int deck_vnc_poll(DeckVNC *v) {
         ok=WriteToRFBServer(v->client,(char*)&message,sz_rfbClientCutTextMsg) && WriteToRFBServer(v->client,(char*)payload,sizeof(payload));
         v->clipboard_caps_sent=ok;
     }
+    return ok;
+}
+int deck_vnc_received_bytes(DeckVNC *v, uint64_t *total) {
+    struct tcp_connection_info info = {0};
+    socklen_t size = sizeof(info);
+    pthread_mutex_lock(&v->mutex);
+    int ok = v->interrupt_fd >= 0 && !v->cancelled &&
+        getsockopt(v->interrupt_fd, IPPROTO_TCP, TCP_CONNECTION_INFO, &info, &size) == 0;
+    pthread_mutex_unlock(&v->mutex);
+    if (ok) *total = info.tcpi_rxbytes;
     return ok;
 }
 int deck_vnc_width(DeckVNC *v) { return v->client->width; }

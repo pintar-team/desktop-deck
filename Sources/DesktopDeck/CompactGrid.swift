@@ -14,7 +14,7 @@ struct CompactGrid: View {
             if mode>0 {
                 ScrollView {
                     LazyVGrid(columns:Array(repeating:GridItem(.flexible(minimum:0),spacing:0),count:grid.columns),spacing:0) {
-                        ForEach(items) { s in DesktopTile(session:s,model:model,compact:true).frame(height:cellH) }
+                        ForEach(items) { s in DesktopTile(session:s,model:model).frame(height:cellH) }
                     }
                 }
             } else {
@@ -23,7 +23,7 @@ struct CompactGrid: View {
                         HStack(spacing:0) {
                             ForEach(0..<grid.columns,id:\.self) { column in
                                 let index=row*grid.columns+column
-                                if index<items.count { DesktopTile(session:items[index],model:model,compact:true).frame(width:cellW,height:cellH) }
+                                if index<items.count { DesktopTile(session:items[index],model:model).frame(width:cellW,height:cellH) }
                                 else { Color.clear.frame(width:cellW,height:cellH) }
                             }
                         }

@@ -11,7 +11,7 @@ import CVNC
                 promisedImage?.cancel();promisedImage=nil
                 texture=nil;previousTexture=nil;sequence = -1;connectionRevision = -1
                 blendTimer?.invalidate();blendTimer=nil;setNeedsDisplay(bounds)
-                modifiers=[];downSymbols.removeAll()
+                modifiers=[];downSymbols.removeAll();pointerPresses.removeAll();panRevision=nil
             }
         }
     }
@@ -28,6 +28,9 @@ import CVNC
     private var connectionRevision = -1
     private var modifiers=NSEvent.ModifierFlags()
     private var downSymbols=[UInt16:(revision:Int,keys:[UInt32])]()
+    private struct PointerRevision: Equatable {let connection: Int,geometry: Int}
+    private var pointerPresses=[Int:PointerRevision]()
+    private var panRevision: Int?
     private var promisedImage: PromisedImageDrop?
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { interactive }
@@ -107,36 +110,47 @@ import CVNC
         encoder.setFragmentBytes(&alpha,length:MemoryLayout<Float>.size,index:0)
         encoder.drawPrimitives(type:.triangleStrip,vertexStart:0,vertexCount:4)
     }
-    private func point(_ event: NSEvent) -> (Int,Int)? {
-        let p=convert(event.locationInWindow,from:nil); return transform.remote(x:p.x,y:p.y)
+    private func point(_ event: NSEvent,clamp: Bool=false) -> (Int,Int)? {
+        let location=convert(event.locationInWindow,from:nil);return transform.remote(x:location.x,y:location.y,clamp:clamp)
     }
     private func mouse(_ event: NSEvent,button: Int?,down: Bool?) {
-        guard interactive,let s=session,let p=point(event) else { return }
-        s.humanInput(invalidatePendingPaste:event.type != .mouseMoved); if down==true { window?.makeFirstResponder(self) }
+        guard interactive,let s=session,s.active else {return}
+        let revision=PointerRevision(connection:s.connectionRevision,geometry:s.geometry)
+        if let button,down==false, pointerPresses.removeValue(forKey:button) != revision {return}
+        let dragging=event.type == .leftMouseDragged || event.type == .rightMouseDragged || event.type == .otherMouseDragged
+        if dragging && !pointerPresses.values.contains(revision) {return}
+        guard let p=point(event,clamp:down==false || dragging) else {return}
+        s.humanInput(invalidatePendingPaste:event.type != .mouseMoved)
+        if let button,down==true {window?.makeFirstResponder(self);pointerPresses[button]=revision}
         var mask=s.mask
         if let button,let down { if down { mask |= button } else { mask &= ~button } }
         s.pointer(p.0,p.1,mask)
     }
-    override func mouseDown(with e: NSEvent) { mouse(e,button:1,down:true) }
-    override func mouseUp(with e: NSEvent) { mouse(e,button:1,down:false) }
+    override func mouseDown(with e: NSEvent) {
+        if e.modifierFlags.contains(.option),interactive,let session,session.active {
+            window?.makeFirstResponder(self);session.humanInput();panRevision=session.connectionRevision
+        } else {panRevision=nil;mouse(e,button:1,down:true)}
+    }
+    override func mouseUp(with e: NSEvent) {if panRevision != nil {panRevision=nil;return};mouse(e,button:1,down:false)}
     override func rightMouseDown(with e: NSEvent) { mouse(e,button:4,down:true) }
     override func rightMouseUp(with e: NSEvent) { mouse(e,button:4,down:false) }
     override func otherMouseDown(with e: NSEvent) { mouse(e,button:2,down:true) }
     override func otherMouseUp(with e: NSEvent) { mouse(e,button:2,down:false) }
     override func mouseMoved(with e: NSEvent) { mouse(e,button:nil,down:nil) }
     override func mouseDragged(with e: NSEvent) {
-        if e.modifierFlags.contains(.option),let s=session {s.humanInput();s.pan.x += e.deltaX; s.pan.y += e.deltaY; setNeedsDisplay(bounds) }
+        if let panRevision {if let s=session,s.active,s.connectionRevision==panRevision {s.humanInput();s.pan.x += e.deltaX;s.pan.y += e.deltaY;setNeedsDisplay(bounds)}}
         else { mouse(e,button:nil,down:nil) }
     }
     override func rightMouseDragged(with e: NSEvent) { mouse(e,button:nil,down:nil) }
+    override func otherMouseDragged(with e: NSEvent) {mouse(e,button:nil,down:nil)}
     override func scrollWheel(with e: NSEvent) {
         guard interactive,let s=session else { return }
         if e.modifierFlags.contains(.option) {s.humanInput();s.zoom=min(8,max(0.25,s.zoom*exp(-e.scrollingDeltaY*0.01))); setNeedsDisplay(bounds); return }
         guard let p=point(e) else { return }; s.humanInput()
-        if e.scrollingDeltaY != 0 { s.pointer(p.0,p.1,e.scrollingDeltaY>0 ? 8:16); s.pointer(p.0,p.1,0) }
+        if e.scrollingDeltaY != 0 {s.scroll(p.0,p.1,up:e.scrollingDeltaY>0)}
     }
     override func magnify(with e: NSEvent) { guard let s=session else { return };s.humanInput();s.zoom=min(8,max(0.25,s.zoom*(1+e.magnification))); setNeedsDisplay(bounds) }
-    override func resignFirstResponder() -> Bool { session?.releaseInput(); modifiers=[];downSymbols.removeAll(); return super.resignFirstResponder() }
+    override func resignFirstResponder() -> Bool {session?.releaseInput();modifiers=[];downSymbols.removeAll();pointerPresses.removeAll();panRevision=nil;return super.resignFirstResponder()}
     @objc func paste(_ sender: Any?) {modifiers=[];session?.pasteMacClipboard()}
     @objc func copy(_ sender: Any?) {modifiers=[];session?.shortcut([0xffe3,0x63])}
     override func viewWillMove(toWindow newWindow: NSWindow?) {

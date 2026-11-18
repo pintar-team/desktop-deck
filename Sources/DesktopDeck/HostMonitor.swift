@@ -80,7 +80,7 @@ enum HostMetricsProbe {
         var candidates=[HostEndpoint:Profile]()
         for s in sessions where s.profile.usesSSH {
             let key=HostEndpoint(s.profile)
-            let terminalOnline=s.terminals.contains{$0.status.hasPrefix("Connected") && HostEndpoint($0.profile)==key}
+            let terminalOnline=s.terminals.contains{$0.isOnline && HostEndpoint($0.profile)==key}
             if (s.isOnline || terminalOnline),candidates[key]==nil {candidates[key]=s.profile}
         }
         let now=Date()
