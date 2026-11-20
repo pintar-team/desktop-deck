@@ -120,6 +120,28 @@ public enum Shell {
         return result
     }
     public static func destination(_ p: Profile) -> String { p.sshHost }
+
+    public static func sshTerminalEnvironment(inheriting parent: [String: String] = ProcessInfo.processInfo.environment) -> [String] {
+        var environment = parent
+        environment["TERM"] = "xterm-256color"
+        if environment["LANG"] == nil { environment["LANG"] = "en_US.UTF-8" }
+        if environment["PATH"] == nil { environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin" }
+        return environment.map { "\($0.key)=\($0.value)" }
+    }
+
+    public static func isTransientSSHFailure(_ message: String) -> Bool {
+        let diagnostic = message.lowercased()
+        // OpenSSH uses exit status 255 for both transport and authentication failures.
+        if ["permission denied", "host key verification failed", "identification has changed",
+            "too many authentication failures"].contains(where: { diagnostic.contains($0) }) { return false }
+        let transientReasons = [
+            "operation timed out", "connection timed out", "network is unreachable",
+            "no route to host", "connection reset by", "connection refused",
+            "connection closed by", "broken pipe", "temporary failure in name resolution",
+            "ssh command exceeded",
+        ]
+        return transientReasons.contains { diagnostic.contains($0) }
+    }
 }
 
 public struct RetryPolicy {

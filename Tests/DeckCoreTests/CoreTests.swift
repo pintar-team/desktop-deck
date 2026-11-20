@@ -88,6 +88,27 @@ final class CoreTests: XCTestCase {
         XCTAssertNil(list[0].socket); XCTAssertEqual(list[1].socket,"/tmp/owned.sock")
         XCTAssertEqual(try RemoteSession.parse("0 5"),[])
     }
+    func testSSHTerminalInheritsAgentSocketAndKeepsTerminalType() {
+        let environment = Shell.sshTerminalEnvironment(inheriting: [
+            "SSH_AUTH_SOCK": "/tmp/agent fixture=1",
+            "PATH": "/custom/bin:/usr/bin",
+            "TERM": "dumb",
+        ])
+        XCTAssertTrue(environment.contains("SSH_AUTH_SOCK=/tmp/agent fixture=1"))
+        XCTAssertTrue(environment.contains("PATH=/custom/bin:/usr/bin"))
+        XCTAssertTrue(environment.contains("TERM=xterm-256color"))
+        XCTAssertTrue(environment.contains("LANG=en_US.UTF-8"))
+        XCTAssertFalse(environment.contains("TERM=dumb"))
+    }
+
+    func testSSHReconnectDistinguishesTransportFailuresFromRejectedKeys() {
+        XCTAssertTrue(Shell.isTransientSSHFailure("ssh: connect to host example.invalid port 22: Network is unreachable"))
+        XCTAssertTrue(Shell.isTransientSSHFailure("kex_exchange_identification: read: Connection reset by peer"))
+        XCTAssertTrue(Shell.isTransientSSHFailure("SSH command exceeded 20 seconds"))
+        XCTAssertFalse(Shell.isTransientSSHFailure("Permission denied (publickey).\nConnection closed by peer"))
+        XCTAssertFalse(Shell.isTransientSSHFailure("Host key verification failed."))
+        XCTAssertFalse(Shell.isTransientSSHFailure("WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!"))
+    }
     func testMalformedSessionListDoesNotSelectAnotherDesktop() {
         for input in ["1 5 :1 12", "1 5 :bad 12 0 @NONE 0", "1 5 :1 -1 0 @NONE 0", "1000000000 5"] {
             XCTAssertThrowsError(try RemoteSession.parse(input))

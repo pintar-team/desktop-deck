@@ -65,6 +65,7 @@ final class TerminalTiming: @unchecked Sendable {
     private var processActive=false
     private var stopping=false
     private var retry=0
+    private var startedAt: ContinuousClock.Instant?
     private var eventMonitor: Any?
     var tmuxName: String { "deck-"+id.uuidString.lowercased() }
     init(profile: Profile,id: UUID=UUID()) {
@@ -83,6 +84,10 @@ final class TerminalTiming: @unchecked Sendable {
         }
     }
     func connect() {
+        retry = 0
+        startConnectionAttempt()
+    }
+    private func startConnectionAttempt() {
         guard profile.usesSSH else { reportFailure("SSH is not configured for this profile"); return }
         desired=true; reconnect?.cancel(); generation += 1
         let g=generation; report(.connecting,"Connecting")
@@ -104,14 +109,35 @@ final class TerminalTiming: @unchecked Sendable {
                     useTmux=r.contains("DECK_TMUX")
                 }
                 guard !Task.isCancelled,desired,generation==g else { return }
-                persistent=useTmux;processActive=true;view.timing.reset()
+                persistent=useTmux;processActive=true;startedAt=ContinuousClock.now;view.timing.reset()
                 let command=persistent ? "exec tmux -L desktop-deck new-session -A -s \(Shell.quote(tmuxName))" : "exec \"${SHELL:-/bin/sh}\" -l"
-                view.startProcess(executable:"/usr/bin/ssh",args:Shell.sshArguments(profile,interactive:true)+["--",profile.sshHost,command],environment:["TERM=xterm-256color","LANG=en_US.UTF-8","PATH=/usr/bin:/bin:/usr/sbin:/sbin"])
+                view.startProcess(
+                    executable: "/usr/bin/ssh",
+                    args: Shell.sshArguments(profile, interactive: true) + ["--", profile.sshHost, command],
+                    environment: Shell.sshTerminalEnvironment()
+                )
                 report(.online,persistent ? "Connected · persistent" : "Connected · plain SSH")
             } catch {
                 guard !Task.isCancelled,generation==g else {return}
-                reportFailure(error.localizedDescription)
+                let message = error.localizedDescription
+                if Shell.isTransientSSHFailure(message) { scheduleReconnect(after: message) }
+                else { reportFailure(message) }
             }
+        }
+    }
+    private func scheduleReconnect(after message: String) {
+        guard retry + 1 < ConnectionLimits.attempts else {
+            reportFailure("Reconnect attempts exhausted · \(message)")
+            return
+        }
+        let delay = RetryPolicy.delay(attempt: retry, jitter: 1)
+        retry += 1
+        report(.connecting, "Reconnecting · \(retry + 1)/\(ConnectionLimits.attempts) · \(message)")
+        let revision = generation
+        reconnect = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard let self, !Task.isCancelled, desired, generation == revision else { return }
+            startConnectionAttempt()
         }
     }
     func detach() { desired=false; generation += 1; reconnect?.cancel(); stopping=processActive; view.terminate(); report(.offline,"Detached"); lease=InputLease() }
@@ -130,21 +156,24 @@ final class TerminalTiming: @unchecked Sendable {
     func hostCurrentDirectoryUpdate(source: TerminalView,directory: String?) {}
     func processTerminated(source: TerminalView,exitCode: Int32?) {
         processActive=false
+        let uptime = startedAt.map { $0.duration(to: .now) }
+        startedAt = nil
         if stopping {
             stopping=false;reconnect?.cancel()
-            if desired {connect()}
+            if desired {startConnectionAttempt()}
             return
         }
         lease=InputLease(); generation += 1
         guard desired else { return }
-        if !persistent {desired=false}
-        report(persistent ? .connecting:(exitCode==0 ? .offline:.attention),persistent ? "Reconnecting":"Disconnected · reconnect opens a new shell")
         if persistent {
-            let delay=RetryPolicy.delay(attempt:retry,jitter:1); retry += 1
-            reconnect=Task { [weak self] in try? await Task.sleep(nanoseconds:UInt64(delay*1e9)); guard let self,!Task.isCancelled,desired else { return }; connect() }
+            if let uptime, uptime >= .seconds(ConnectionLimits.stableSeconds) { retry = 0 }
+            scheduleReconnect(after: "SSH connection ended")
+        } else {
+            desired=false
+            report(exitCode==0 ? .offline:.attention, "Disconnected · reconnect opens a new shell")
         }
     }
-    func processFailedToStart(source: TerminalView,error: LocalProcessError) {processActive=false;stopping=false;reportFailure("SSH process could not start")}
+    func processFailedToStart(source: TerminalView,error: LocalProcessError) {processActive=false;stopping=false;startedAt=nil;reportFailure("SSH process could not start")}
     deinit { if let eventMonitor { NSEvent.removeMonitor(eventMonitor) } }
 }
 @MainActor final class TerminalContainer: NSView {
