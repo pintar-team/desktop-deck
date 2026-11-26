@@ -34,6 +34,8 @@ import CVNC
     private var promisedImage: PromisedImageDrop?
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { interactive }
+    // Keep the VNC mouse sequence inside this view, even under the hidden title bar.
+    override var mouseDownCanMoveWindow: Bool { false }
     override var intrinsicContentSize: NSSize {NSSize(width:NSView.noIntrinsicMetric,height:NSView.noIntrinsicMetric)}
     init() {
         let device=MTLCreateSystemDefaultDevice()
