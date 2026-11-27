@@ -69,7 +69,7 @@ final class ControlServer: @unchecked Sendable {
         switch tool {
         case "profiles_manage":return try manageProfiles(a)
         case "workspace_transfer":return try transferConfiguration(a)
-        case "connections_list": return ["version":"0.3.13","keyboardFocus":keyboardFocusRequest?.status ?? "idle","window":WindowLayout.info(NSApp.mainWindow),"profiles":sessions.map { s in
+        case "connections_list": return ["version":"0.3.14","keyboardFocus":keyboardFocusRequest?.status ?? "idle","window":WindowLayout.info(NSApp.mainWindow),"profiles":sessions.map { s in
             ["id":s.id.uuidString,"name":s.profile.name,"state":s.state,"detail":s.detail,"generation":s.connectionRevision,"geometry":s.geometry,"width":s.frame?.width ?? 0,"height":s.frame?.height ?? 0,"ssh":s.profile.usesSSH,"vnc":s.profile.hasVNC,"sessionManager":s.profile.sessionManager,"quality":s.profile.quality,"view":s.surfaceMode,"viewState":s.viewState,"resolutionStatus":s.resolutionStatus,"attempt":s.attemptNumber,"maxAttempts":ConnectionLimits.attempts,"retryIn":s.retryCountdown,"lastError":s.lastError,"hostMetrics":s.hostMetrics?.rpc ?? [:],"metricsError":s.hostMetricsError,"activity":s.activity.map{["perSecond":$0.perSecond,"unit":$0.unit,"segments":$0.segments] as [String:Any]} ?? [:]] as [String:Any]
         }]
         case "connection_control":
@@ -140,7 +140,18 @@ final class ControlServer: @unchecked Sendable {
             switch string("key") { case "": value=string("text"); case "Enter": value="\r"; case "Ctrl-C": value="\u{03}"; default: throw DeckError("Supported terminal keys: Enter, Ctrl-C") }
             guard value.utf8.count<=65536 else { throw DeckError("Input too large") }; t.send(value); return ["accepted":true,"completion":"input sent; command status unknown"]
         case "terminal_control":
-            let t=try terminal(); switch string("action") { case "reconnect": t.detach(); t.connect(); case "detach": t.detach(); case "end": try await t.end(); default: throw DeckError("Expected reconnect, detach or end") }; return terminalInfo(t)
+            let t=try terminal(), action=string("action")
+            guard !t.isEnding else {throw DeckError("Terminal is already closing")}
+            switch action {
+            case "reconnect": t.detach(); t.connect()
+            case "detach": t.detach()
+            case "end", "close":
+                guard let owner=sessions.first(where:{$0.terminals.contains(where:{$0.id==t.id})}) else {throw DeckError("Unknown terminal ID")}
+                try await closeTerminal(t,in:owner,endSession:action=="end")
+                return terminalInfo(t).merging(["closed":true]){_,new in new}
+            default: throw DeckError("Expected reconnect, detach, close or end")
+            }
+            return terminalInfo(t)
         default: throw DeckError("Unsupported tool")
         }
     }

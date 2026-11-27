@@ -17,6 +17,6 @@ The clipboard tool reads/writes only the remote text clipboard. Obtain current g
 
 Terminal tabs are shared with the human. Open or select a tab, read its output and generation, then send input. Sending text does not press Enter. Send terminal_input key Enter separately when execution is intended. The accepted result proves input delivery only, not command completion or successful chat submission. Read the output to establish the result. Use bounded reads and output cursors. Never resend a command automatically after a connection failure.
 
-tmux is optional. persistent=true permits reattachment; plain SSH may lose the shell and its commands on disconnect. Creation of a VNC desktop and ending a terminal require an explicit user task. Ordinary disconnect/detach preserves remote VNC desktops and persistent terminals.
+tmux is optional. persistent=true permits reattachment; plain SSH may lose the shell and its commands on disconnect. Creation of a VNC desktop and ending a terminal require an explicit user task. Ordinary disconnect/detach preserves remote VNC desktops and persistent terminals. For terminal_control, end ends the app-owned shell and removes its tab. close removes the tab, preserving tmux and disconnecting plain SSH. detach keeps the tab available for reconnection.
 
 Honor the target project's established messaging and administrative workflows. Desktop control does not supersede project-specific authorization or delivery verification.

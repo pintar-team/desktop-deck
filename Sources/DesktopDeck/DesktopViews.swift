@@ -98,6 +98,7 @@ struct TerminalPanel: View {
     @ObservedObject var model: WorkspaceModel
     var splitAvailable: CGFloat?
     @State private var dragOrigin: CGFloat?
+    @State private var closingTab: TerminalTab?
     private var fittedHeight: CGFloat? {
         guard let splitAvailable else {return nil}
         return CGFloat(SplitLayout.terminalHeight(preferred:session.terminalHeight,available:splitAvailable))
@@ -112,10 +113,12 @@ struct TerminalPanel: View {
             }.onEnded{_ in dragOrigin=nil})}
             HStack(spacing:4) {
                 ScrollView(.horizontal,showsIndicators:false){HStack(spacing:2){ForEach(session.terminals){tab in
-                    TerminalTabButton(tab:tab,selected:session.selectedTerminal==tab.id,tint:session.tint,previousEndpoint:!tab.profile.hasSameTerminalConnection(as:session.profile)){session.selectedTerminal=tab.id;model.requestKeyboardFocus(terminal:true)}
+                    TerminalTabButton(tab:tab,selected:session.selectedTerminal==tab.id,tint:session.tint,previousEndpoint:!tab.profile.hasSameTerminalConnection(as:session.profile),select:{
+                        session.selectedTerminal=tab.id;model.requestKeyboardFocus(terminal:true)
+                    },close:{requestClose(tab)})
                 }}}
                 Button{_=model.openTerminal(session)}label:{Image(systemName:"plus")}.help("New terminal tab")
-                if let tab=selected {TerminalActions(tab:tab)}
+                if let tab=selected {TerminalActions(tab:tab,end:{requestClose(tab)})}
             }.buttonStyle(.borderless).controlSize(.mini).padding(.horizontal,5).frame(height:SplitLayout.tabBarHeight).background(DeckTheme.panel)
             Group {if let tab=selected {TerminalSurface(tab:tab,focusRequest:model.keyboardFocus(for:session.id,terminal:tab.id))}
             else {
@@ -124,9 +127,27 @@ struct TerminalPanel: View {
                     Button("Connect"){_=model.openTerminal(session)}.controlSize(.small)
                 }
             }}.frame(maxWidth:.infinity,maxHeight:.infinity).frame(height:fittedHeight)
+        }.alert("Close terminal tab?",isPresented:Binding(get:{closingTab != nil},set:{if !$0 {closingTab=nil}}),presenting:closingTab) { tab in
+            Button("End and Close",role:.destructive) {close(tab,endSession:true)}
+            if tab.mayHaveTmuxSession {Button("Close Tab Only") {close(tab,endSession:false)}}
+            Button("Cancel",role:.cancel) {}
+        } message: { tab in
+            Text(tab.mayHaveTmuxSession
+                 ? "Close Tab Only leaves the tmux session running on the server and removes this tab."
+                 : "Closing the tab ends its SSH shell.")
         }
     }
     private var selected: TerminalTab? {session.selectedTab}
+    private func requestClose(_ tab: TerminalTab) {
+        if tab.desired || tab.mayHaveTmuxSession {closingTab=tab}
+        else {close(tab,endSession:false)}
+    }
+    private func close(_ tab: TerminalTab,endSession: Bool) {
+        Task {
+            do {try await model.closeTerminal(tab,in:session,endSession:endSession)}
+            catch {session.showFeedback("Couldn’t close terminal")}
+        }
+    }
 }
 struct TerminalTabButton: View {
     @ObservedObject var tab: TerminalTab
@@ -134,20 +155,39 @@ struct TerminalTabButton: View {
     let tint: Color
     var previousEndpoint=false
     let select: ()->Void
+    let close: ()->Void
+    @State private var hovering=false
     var body: some View {
-        Button(action:select){
-            HStack(spacing:4){
-                ConnectionMark(state:tab.connection.indicator,tint:tint)
-                Text(tab.title).font(.system(size:11,weight:selected ? .semibold:.regular)).lineLimit(1)
-                if previousEndpoint {Text((tab.profile.sshUser.isEmpty ? "":tab.profile.sshUser+"@")+tab.profile.sshHost).font(.system(size:10)).foregroundStyle(.secondary).lineLimit(1)}
-            }.padding(.horizontal,5).frame(height:22).foregroundStyle(selected ? tint:.primary)
-                .overlay(alignment:.bottom){Rectangle().fill(selected ? tint:.clear).frame(height:1)}
-        }.buttonStyle(.plain).help(tab.status)
+        HStack(spacing:3) {
+            Button(action:select){
+                HStack(spacing:4){
+                    ConnectionMark(state:tab.connection.indicator,tint:tint)
+                    Text(tab.title).font(.system(size:11,weight:selected ? .semibold:.regular)).lineLimit(1)
+                    if previousEndpoint {Text((tab.profile.sshUser.isEmpty ? "":tab.profile.sshUser+"@")+tab.profile.sshHost).font(.system(size:10)).foregroundStyle(.secondary).lineLimit(1)}
+                }.padding(.leading,5).frame(height:22).foregroundStyle(selected ? tint:.primary)
+            }.help(tab.status)
+            Button(action:close) {
+                Image(systemName:"xmark").font(.system(size:8,weight:.semibold))
+                    .frame(width:16,height:18).contentShape(Rectangle())
+                    .foregroundStyle(selected ? tint:Color.secondary)
+                    .opacity(selected || hovering ? 1:0.65)
+            }.disabled(tab.isEnding).help("Close terminal tab").accessibilityLabel("Close \(tab.title) tab")
+        }.buttonStyle(.plain)
+            .overlay(alignment:.bottom){Rectangle().fill(selected ? tint:.clear).frame(height:1).allowsHitTesting(false)}
+            .onHover{hovering=$0}
     }
 }
 struct TerminalActions: View {
     @ObservedObject var tab: TerminalTab
-    var body: some View {Menu{Text(tab.status);Divider();Button("Reconnect"){tab.detach();tab.connect()};Button("Detach"){tab.detach()};Button("End terminal",role:.destructive){Task{do{try await tab.end()}catch{tab.reportFailure(error.localizedDescription)}}}}label:{Image(systemName:"ellipsis")}.help(tab.status)}
+    let end: ()->Void
+    var body: some View {
+        Menu {
+            Text(tab.status);Divider()
+            Button("Reconnect"){tab.detach();tab.connect()}
+            Button("Detach"){tab.detach()}
+            Button("End terminal",role:.destructive,action:end)
+        } label:{Image(systemName:"ellipsis")}.disabled(tab.isEnding).help(tab.status)
+    }
 }
 extension View {
     func cursorResize() -> some View {onHover{if $0 {NSCursor.resizeUpDown.push()}else{NSCursor.pop()}}}

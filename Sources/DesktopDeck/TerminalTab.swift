@@ -54,8 +54,11 @@ final class TerminalTiming: @unchecked Sendable {
     var status: String {connection.message}
     var isOnline: Bool {connection.indicator == .online}
     private func report(_ indicator: ConnectionIndicator,_ message: String) {connection=Connection(indicator:indicator,message:message)}
-    func reportFailure(_ message: String) {desired=false;report(.attention,message)}
+    private func reportFailure(_ message: String) {desired=false;report(.attention,message)}
     @Published var persistent=false
+    @Published private(set) var isEnding=false
+    private(set) var tmuxSessionPossible: Bool?
+    var mayHaveTmuxSession: Bool {profile.terminalMode != "plain" && tmuxSessionPossible != false}
     @Published var generation=0
     var outputRevision: Int {view.timing.revision}
     let view=DeckTerminalView(frame:NSRect(x:0,y:0,width:800,height:260))
@@ -68,8 +71,8 @@ final class TerminalTiming: @unchecked Sendable {
     private var startedAt: ContinuousClock.Instant?
     private var eventMonitor: Any?
     var tmuxName: String { "deck-"+id.uuidString.lowercased() }
-    init(profile: Profile,id: UUID=UUID()) {
-        self.profile=profile; self.id=id
+    init(profile: Profile,id: UUID=UUID(),tmuxSessionPossible: Bool?=nil) {
+        self.profile=profile; self.id=id; self.tmuxSessionPossible=tmuxSessionPossible
         view.processDelegate=self; view.font=NSFont.monospacedSystemFont(ofSize:13,weight:.regular)
         view.human = { [weak self] in self?.lease.human() }
         let timing=view.timing
@@ -84,6 +87,7 @@ final class TerminalTiming: @unchecked Sendable {
         }
     }
     func connect() {
+        guard !isEnding else {return}
         retry = 0
         startConnectionAttempt()
     }
@@ -109,6 +113,7 @@ final class TerminalTiming: @unchecked Sendable {
                     useTmux=r.contains("DECK_TMUX")
                 }
                 guard !Task.isCancelled,desired,generation==g else { return }
+                tmuxSessionPossible = tmuxSessionPossible == true || useTmux
                 persistent=useTmux;processActive=true;startedAt=ContinuousClock.now;view.timing.reset()
                 let command=persistent ? "exec tmux -L desktop-deck new-session -A -s \(Shell.quote(tmuxName))" : "exec \"${SHELL:-/bin/sh}\" -l"
                 view.startProcess(
@@ -140,11 +145,42 @@ final class TerminalTiming: @unchecked Sendable {
             startConnectionAttempt()
         }
     }
-    func detach() { desired=false; generation += 1; reconnect?.cancel(); stopping=processActive; view.terminate(); report(.offline,"Detached"); lease=InputLease() }
+    func detach() {
+        guard !isEnding else {return}
+        desired=false; generation += 1; reconnect?.cancel(); stopping=processActive; view.terminate(); report(.offline,"Detached"); lease=InputLease()
+    }
     func end() async throws {
+        guard !isEnding else {throw DeckError("Terminal is already closing")}
         detach()
-        if persistent { _=try await Commands.ssh(profile,"tmux -L desktop-deck kill-session -t \(Shell.quote(tmuxName))") }
-        report(.offline,"Ended")
+        isEnding=true
+        report(.connecting,"Ending terminal…")
+        defer {isEnding=false}
+        do {
+            // Wait for the attaching SSH client before touching its tmux session.
+            let deadline=ContinuousClock.now.advanced(by:.seconds(5))
+            while processActive {
+                guard ContinuousClock.now < deadline else {throw DeckError("SSH is still closing · retry")}
+                try await Task.sleep(for:.milliseconds(50))
+            }
+            if mayHaveTmuxSession {
+                let target=Shell.quote("="+tmuxName)
+                // Only absence of this exact target or its socket is success.
+                _=try await Commands.ssh(profile,"""
+                    message=$(LC_ALL=C tmux -L desktop-deck kill-session -t \(target) 2>&1) || {
+                        case "$message" in
+                            "can't find session: \(tmuxName)"|"can't find session: =\(tmuxName)"|"no server running on "*|"error connecting to "*" (No such file or directory)") exit 0 ;;
+                        esac
+                        printf '%s\\n' "$message" >&2
+                        exit 1
+                    }
+                    """)
+                tmuxSessionPossible=false
+            }
+            report(.offline,"Ended")
+        } catch {
+            reportFailure(error.localizedDescription)
+            throw error
+        }
     }
     func send(_ text: String) { view.timing.input();view.send(source:view,data:Array(text.utf8)[...]) }
     func read(limit: Int) -> String {

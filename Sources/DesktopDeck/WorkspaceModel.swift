@@ -251,7 +251,9 @@ import CVNC
     }
     func persist() {
         saved.profiles=sessions.map {s in var profile=s.profile;profile.surfaceMode=s.surfaceMode;return profile}
-        saved.terminals=sessions.flatMap { s in s.terminals.map{SavedTerminal(id:$0.id,profile:s.id,reconnect:$0.desired,profileSnapshot:$0.profile)} }
+        saved.terminals=sessions.flatMap { s in
+            s.terminals.map {SavedTerminal(id:$0.id,profile:s.id,reconnect:$0.desired,profileSnapshot:$0.profile,tmuxSessionPossible:$0.tmuxSessionPossible)}
+        }
         do { try Storage.save(saved) } catch { self.error=error.localizedDescription }
     }
     func start() {
@@ -267,7 +269,7 @@ import CVNC
         do { server=try ControlServer(model:self) } catch { self.error=error.localizedDescription }
         for record in terminalRecords {
             if let s=sessions.first(where:{$0.id==record.profile}) {
-                let tab=makeTerminal(s,id:record.id,profile:record.profileSnapshot);s.terminals.append(tab)
+                let tab=makeTerminal(s,id:record.id,profile:record.profileSnapshot,tmuxSessionPossible:record.tmuxSessionPossible);s.terminals.append(tab)
                 if tab.profile.hasSameTerminalConnection(as:s.profile) {s.selectedTerminal=tab.id}
                 if record.reconnect { tab.connect() }
             }
@@ -339,8 +341,28 @@ import CVNC
         }
         updateRenderingRates();persist();return tab
     }
-    private func makeTerminal(_ s: DesktopSession,id: UUID=UUID(),profile: Profile?=nil) -> TerminalTab {
-        let tab=TerminalTab(profile:profile ?? s.profile,id:id)
+    func closeTerminal(_ tab: TerminalTab,in session: DesktopSession,endSession: Bool) async throws {
+        guard session.terminals.contains(where:{$0.id==tab.id}),!tab.isEnding else {throw DeckError("Terminal is already closing or closed")}
+        if endSession {
+            do { try await tab.end() }
+            catch {persist();throw error}
+        } else {tab.detach()}
+        guard let index=session.terminals.firstIndex(where:{$0.id==tab.id}) else {return}
+        let hadKeyboardFocus=tab.view.ownsKeyboardFocus
+        session.terminalObservations.removeValue(forKey:tab.id)
+        session.terminals.remove(at:index)
+        if session.selectedTerminal==tab.id {
+            let next=min(index,session.terminals.count-1)
+            session.selectedTerminal=session.terminals.indices.contains(next) ? session.terminals[next].id:nil
+            if focused?.id==session.id && viewMode.showsTerminal {
+                if hadKeyboardFocus {requestKeyboardFocus(terminal:session.selectedTerminal != nil)}
+                else if keyboardFocusRequest?.terminal==tab.id {keyboardFocusRequest=nil}
+            }
+        }
+        persist()
+    }
+    private func makeTerminal(_ s: DesktopSession,id: UUID=UUID(),profile: Profile?=nil,tmuxSessionPossible: Bool?=nil) -> TerminalTab {
+        let tab=TerminalTab(profile:profile ?? s.profile,id:id,tmuxSessionPossible:tmuxSessionPossible)
         tab.view.feedback = {[weak s] message in s?.showFeedback(message)}
         s.terminalObservations[tab.id]=tab.$connection.removeDuplicates().sink {[weak self,weak s] _ in s?.objectWillChange.send();self?.objectWillChange.send()}
         return tab

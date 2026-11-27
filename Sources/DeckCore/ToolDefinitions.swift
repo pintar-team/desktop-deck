@@ -27,7 +27,7 @@ public enum ToolDefinitions {
             tool("terminal_open","Open an SSH terminal tab. Auto-detects optional tmux.",session,["profile"]),
             tool("terminal_read","Read bounded terminal buffer; returns generation and truncation metadata.",["terminal":"string","limit":"integer","cursor":"integer"],["terminal"]),
             tool("terminal_input","Send text, Enter or Ctrl-C to the same visible terminal. Sending input is not proof of command completion. Never replay automatically.",["terminal":"string","generation":"integer","text":"string","key":"string"],["terminal","generation"]),
-            tool("terminal_control","Reconnect, detach or explicitly end an app-owned terminal.",["terminal":"string","action":"string"],["terminal","action"])
+            tool("terminal_control","Reconnect or detach a terminal; close removes its tab and preserves tmux; end terminates the app-owned session and removes its tab.",["terminal":"string","action":"string"],["terminal","action"])
         ]
     }()
 }

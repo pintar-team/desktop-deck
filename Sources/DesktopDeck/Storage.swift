@@ -8,7 +8,13 @@ struct SavedState: Codable {
     var selectedWorkspace: UUID?
     var terminals: [SavedTerminal]?
 }
-struct SavedTerminal: Codable { let id: UUID; let profile: UUID; let reconnect: Bool;var profileSnapshot: Profile? }
+struct SavedTerminal: Codable {
+    let id: UUID
+    let profile: UUID
+    let reconnect: Bool
+    var profileSnapshot: Profile?
+    var tmuxSessionPossible: Bool?
+}
 enum Storage {
     static var stateURL: URL { LocalRPC.directory.appendingPathComponent("workspace.json") }
     static func load() throws -> SavedState {
