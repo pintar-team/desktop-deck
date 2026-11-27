@@ -43,12 +43,13 @@ enum DeckTheme {
 }
 
 struct WindowBackdrop: NSViewRepresentable {
-    let hideButtons: Bool
     let updateLayout: (Bool,CGFloat)->Void
+    func makeCoordinator() -> CloseConfirmation { CloseConfirmation() }
     func makeNSView(context: Context) -> NSView {NSView()}
     func updateNSView(_ view: NSView,context: Context) {
-        DispatchQueue.main.async {
+        DispatchQueue.main.async { [weak coordinator=context.coordinator] in
             guard let window=view.window else {return}
+            coordinator?.attach(to:window)
             if window.titleVisibility != .hidden {window.titleVisibility = .hidden}
             if !window.titlebarAppearsTransparent {window.titlebarAppearsTransparent=true}
             if window.toolbar != nil {window.toolbar=nil}
@@ -56,8 +57,58 @@ struct WindowBackdrop: NSViewRepresentable {
             window.acceptsMouseMovedEvents=true
             if !window.styleMask.contains(.fullSizeContentView) {window.styleMask.insert(.fullSizeContentView)}
             window.backgroundColor=NSColor(red:0.025,green:0.04,blue:0.065,alpha:1)
-            for button in [NSWindow.ButtonType.closeButton,.miniaturizeButton,.zoomButton] {window.standardWindowButton(button)?.isHidden=hideButtons}
+            for button in [NSWindow.ButtonType.closeButton,.miniaturizeButton,.zoomButton] {window.standardWindowButton(button)?.isHidden=true}
             updateLayout(window.styleMask.contains(.fullScreen),WindowLayout.topInset(window))
+        }
+    }
+    static func dismantleNSView(_ view: NSView,coordinator: CloseConfirmation) { coordinator.detach() }
+
+    static func requestClose(_ window: NSWindow?) {
+        guard let window else { return }
+        if let confirmation=window.delegate as? CloseConfirmation { _=confirmation.windowShouldClose(window) }
+        else { window.performClose(nil) }
+    }
+
+    @MainActor final class CloseConfirmation: NSObject, NSWindowDelegate {
+        private weak var window: NSWindow?
+        private weak var original: (any NSWindowDelegate)?
+
+        func attach(to window: NSWindow) {
+            guard window.delegate !== self else { return }
+            detach()
+            self.window=window
+            original=window.delegate
+            window.delegate=self
+        }
+
+        func detach() {
+            if let window, window.delegate === self { window.delegate=original }
+            window=nil
+            original=nil
+        }
+
+        override func responds(to selector: Selector!) -> Bool {
+            super.responds(to:selector) || original?.responds(to:selector) == true
+        }
+
+        override func forwardingTarget(for selector: Selector!) -> Any? {
+            if original?.responds(to:selector) == true { return original }
+            return super.forwardingTarget(for:selector)
+        }
+
+        func windowShouldClose(_ sender: NSWindow) -> Bool {
+            guard sender.attachedSheet == nil else { return false }
+            let alert=NSAlert()
+            alert.messageText="Close Desktop Deck window?"
+            alert.informativeText="Desktop Deck stays running and keeps its connections open."
+            alert.addButton(withTitle:"Cancel").keyEquivalent="\r"
+            alert.addButton(withTitle:"Close Window").hasDestructiveAction=true
+            alert.beginSheetModal(for:sender) { [weak self,weak sender] response in
+                guard response == .alertSecondButtonReturn,let self,let sender,
+                      self.original?.windowShouldClose?(sender) != false else { return }
+                sender.close()
+            }
+            return false
         }
     }
 }

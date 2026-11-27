@@ -57,7 +57,7 @@ struct WorkspaceView: View {
             if !toolbarVisible {Color.clear.frame(height:5).contentShape(Rectangle()).onHover {if $0 {withAnimation{revealChrome=true}}}.padding(.trailing,70)}
         }
         .padding(.top,model.isFullScreen ? fullScreenTopInset:0)
-        .background(WindowBackdrop(hideButtons:chromeMode != "normal",updateLayout:{fullScreen,inset in
+        .background(WindowBackdrop(updateLayout:{fullScreen,inset in
             if model.isFullScreen != fullScreen {model.isFullScreen=fullScreen}
             if fullScreenTopInset != inset {fullScreenTopInset=inset}
         }))
@@ -79,32 +79,39 @@ struct WorkspaceView: View {
             } else if let s=model.focused {
                 VStack(spacing:0) {
                     DesktopPanel(session:s,model:model)
-                    if showThumbnails {ScrollView(.horizontal) {
-                        HStack(spacing:0){ForEach(model.visible){DesktopTile(session:$0,model:model).frame(width:180,height:112)}}
-                    }.frame(height:112).background(DeckTheme.background)}
+                    if showThumbnails { filmstrip }
                 }
             }
         }.frame(minWidth:0,maxWidth:.infinity,minHeight:0,maxHeight:.infinity)
     }
+    private var filmstrip: some View {
+        let sessions = model.visible
+        let byID = Dictionary(uniqueKeysWithValues:sessions.map{($0.id,$0)})
+        return ReorderLane(axis:.horizontal,extent:180,ids:sessions.map(\.id),tint:activeTint,reorder:model.moveFilmstrip) { id in
+            if let session=byID[id] {DesktopTile(session:session,model:model,gridReorder:false)}
+        }.id(model.workspace.id).frame(height:112).background(DeckTheme.background)
+    }
     private var sidebar: some View {
-        VStack(spacing:0) {
+        let sessions = model.sidebarSessions
+        let byID = Dictionary(uniqueKeysWithValues:sessions.map{($0.id,$0)})
+        return VStack(spacing:0) {
             TextField("Find connections",text:$model.search).textFieldStyle(.roundedBorder)
-                .padding(.horizontal,8).padding(.top,chromeMode=="normal" && !model.isFullScreen ? 34:8).padding(.bottom,5)
-            List {
-                ForEach(model.sidebarSessions) {s in
-                    SidebarRow(session:s,selected:model.focused?.id==s.id).contentShape(Rectangle())
-                        .onTapGesture {
-                            model.updateWorkspace{if !$0.profiles.contains(s.id){$0.profiles.append(s.id)};$0.focused=s.id}
-                            if model.workspace.focusMode && !s.profile.hasVNC {model.setViewMode(.terminal)}
-                            model.requestKeyboardFocus()
-                        }
-                        .contextMenu {
+                .padding(.horizontal,8).padding(.top,8).padding(.bottom,5)
+            ReorderLane(axis:.vertical,extent:38,ids:sessions.map(\.id),tint:activeTint,reorder:model.moveSidebar) { id in
+                if let s=byID[id] {
+                    Button {
+                        model.updateWorkspace{if !$0.profiles.contains(s.id){$0.profiles.append(s.id)};$0.focused=s.id}
+                        if model.workspace.focusMode && !s.profile.hasVNC {model.setViewMode(.terminal)}
+                        model.requestKeyboardFocus()
+                    } label: {
+                        SidebarRow(session:s,selected:model.focused?.id==s.id).frame(maxHeight:.infinity).contentShape(Rectangle())
+                    }.buttonStyle(.plain).contextMenu {
                             ConnectionActions(session:s,model:model)
-                            Divider();Button("Edit connection"){model.editProfile(s)};Button("Duplicate connection"){model.duplicateProfile(s)};ConnectionOrderMenu(session:s,model:model);ProfileColorMenu(session:s,model:model)
+                            Divider();Button("Edit connection"){model.editProfile(s)};Button("Duplicate connection"){model.duplicateProfile(s)};ConnectionOrderMenu(session:s,model:model,sidebar:true);ProfileColorMenu(session:s,model:model)
                             Button("Remove connection",role:.destructive){model.delete(s)}
-                        }
-                }.onMove(perform:model.moveSidebar)
-            }.listStyle(.sidebar).scrollContentBackground(.hidden)
+                    }
+                }
+            }.padding(.horizontal,6)
             HStack {
                 Button {model.editProfile()} label:{Label("Connection",systemImage:"plus")}
                 Spacer();Text("\(model.sessions.filter(\.isOnline).count) online").font(.caption).foregroundStyle(.secondary)
@@ -147,11 +154,19 @@ struct WorkspaceView: View {
                 Divider();Button("Connect workspace"){model.visible.forEach(model.connectIfNeeded)}
                 Button("Disconnect workspace"){model.visible.forEach{model.disconnect($0)}}
             } label:{Image(systemName:"ellipsis")}.help("Workspace actions and preferences")
-            Button {model.toggleFullScreen()} label:{Image(systemName:model.isFullScreen ? "arrow.down.right.and.arrow.up.left":"arrow.up.left.and.arrow.down.right")}.help("Full screen · ⌃⌘F")
             if chromeMode != "normal" {Button {revealChrome=false;pinnedChrome=false} label:{Image(systemName:"chevron.up")}.help("Hide toolbar")}
+            Rectangle().fill(DeckTheme.border).frame(width:1,height:14).allowsHitTesting(false)
+            HStack(spacing:5) {
+                Button {NSApp.keyWindow?.miniaturize(nil)} label:{Image(systemName:"minus")}
+                    .disabled(model.isFullScreen).help("Minimize window · ⌘M").accessibilityLabel("Minimize window")
+                Button {model.toggleFullScreen()} label:{Image(systemName:model.isFullScreen ? "arrow.down.right.and.arrow.up.left":"arrow.up.left.and.arrow.down.right")}
+                    .help("Full screen · ⌃⌘F").accessibilityLabel(model.isFullScreen ? "Exit full screen":"Enter full screen")
+                Button {WindowBackdrop.requestClose(NSApp.keyWindow)} label:{Image(systemName:"xmark")}
+                    .help("Close window · ⌘W").accessibilityLabel("Close window")
+            }
         }.buttonStyle(.borderless).controlSize(.mini).font(.system(size:12))
             .foregroundStyle(activeTint).tint(activeTint)
-            .padding(.leading,chromeMode=="normal" && !sidebarVisible && !model.isFullScreen ? 80:5).padding(.trailing,5).frame(height:30).background(DeckTheme.panel)
+            .padding(.horizontal,5).frame(height:30).background(DeckTheme.panel)
             .overlay(alignment:.bottom){activeTint.opacity(0.2).frame(height:1).allowsHitTesting(false)}
             .onHover {inside in
                 hideTask?.cancel()

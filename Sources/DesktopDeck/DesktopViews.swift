@@ -22,6 +22,7 @@ struct SidebarRow: View {
 struct DesktopTile: View {
     @ObservedObject var session: DesktopSession
     @ObservedObject var model: WorkspaceModel
+    var gridReorder = true
     @State private var dropTarget=false
     var body: some View {
         GeometryReader { geo in
@@ -42,8 +43,8 @@ struct DesktopTile: View {
                     }.padding(.top,geo.size.height<92 ? 16:0).frame(minWidth:0,maxWidth:.infinity,minHeight:0,maxHeight:.infinity)
                 }
             }.frame(width:geo.size.width,height:geo.size.height).clipped()
-                .overlay {TileChrome(session:session,emphasized:model.focused?.id==session.id || dropTarget,open:open)}
-                .dropDestination(for:String.self) {items,location in guard let value=items.first,let source=UUID(uuidString:value) else {return false};return model.moveInWorkspace(source,relativeTo:session.id,after:location.x>geo.size.width/2)} isTargeted:{dropTarget=$0}
+                .overlay {TileChrome(session:session,emphasized:model.focused?.id==session.id || dropTarget,gridReorder:gridReorder,open:open)}
+                .dropDestination(for:String.self) {items,location in guard gridReorder,let value=items.first,let source=UUID(uuidString:value) else {return false};return model.moveInWorkspace(source,relativeTo:session.id,after:location.x>geo.size.width/2)} isTargeted:{dropTarget=gridReorder && $0}
                 .contextMenu {ConnectionActions(session:session,model:model);Divider();Button("Open terminal"){_=model.openTerminal(session)}.disabled(!session.profile.usesSSH);Button("Edit connection"){model.editProfile(session)};Button("Duplicate connection"){model.duplicateProfile(session)};ConnectionOrderMenu(session:session,model:model);ProfileColorMenu(session:session,model:model)}
                 .help([session.tooltip,session.activity?.hint].compactMap{$0}.joined(separator:"\n"))
         }

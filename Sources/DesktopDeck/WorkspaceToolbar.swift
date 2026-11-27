@@ -70,11 +70,17 @@ struct ConnectionActions: View {
 struct ConnectionOrderMenu: View {
     let session: DesktopSession
     @ObservedObject var model: WorkspaceModel
-    private var index: Int? {model.workspace.profiles.firstIndex(of:session.id)}
+    var sidebar=false
     var body: some View {
+        let order=sidebar ? model.sidebarSessions.map(\.id):model.workspace.profiles
+        let index=order.firstIndex(of:session.id)
         Menu("Order") {
-            Button("Move earlier"){model.moveInWorkspace(session.id,by:-1)}.disabled(index==nil || index==0)
-            Button("Move later"){model.moveInWorkspace(session.id,by:1)}.disabled(index==nil || index==model.workspace.profiles.count-1)
+            Button("Move earlier"){move(by:-1)}.disabled(index==nil || index==0)
+            Button("Move later"){move(by:1)}.disabled(index==nil || index==order.count-1)
         }
+    }
+    private func move(by offset: Int) {
+        if sidebar {model.moveSidebar(session.id,by:offset)}
+        else {model.moveInWorkspace(session.id,by:offset)}
     }
 }

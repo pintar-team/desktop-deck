@@ -350,14 +350,21 @@ import CVNC
         profileDraft=ProfileDraft(profile:s.profile.duplicated(),duplicateSource:s.id)
     }
     var sidebarSessions: [DesktopSession] {
-        let order=workspace.profiles+sessions.map(\.id).filter{!workspace.profiles.contains($0)}
-        return order.compactMap{id in sessions.first{$0.id==id}}.filter{search.isEmpty || $0.profile.name.localizedCaseInsensitiveContains(search) || $0.profile.group.localizedCaseInsensitiveContains(search)}
+        sessions.filter{search.isEmpty || $0.profile.name.localizedCaseInsensitiveContains(search) || $0.profile.group.localizedCaseInsensitiveContains(search)}
     }
-    func moveSidebar(from offsets: IndexSet,to destination: Int) {
-        var order=sidebarSessions.map(\.id);order.move(fromOffsets:offsets,toOffset:destination)
+    func moveSidebar(using order: [UUID]) {
         let ids=ConnectionOrder.reorder(sessions.map(\.id),using:order)
         let byID=Dictionary(uniqueKeysWithValues:sessions.map{($0.id,$0)})
         sessions=ids.compactMap{byID[$0]}
+        updateWorkspace{$0.profiles=ConnectionOrder.reorder($0.profiles,using:order)}
+    }
+    func moveSidebar(_ id: UUID,by offset: Int) {
+        var order=sidebarSessions.map(\.id)
+        guard let index=order.firstIndex(of:id),order.indices.contains(index+offset) else {return}
+        order.swapAt(index,index+offset)
+        moveSidebar(using:order)
+    }
+    func moveFilmstrip(using order: [UUID]) {
         updateWorkspace{$0.profiles=ConnectionOrder.reorder($0.profiles,using:order)}
     }
     func moveInWorkspace(_ source: UUID,relativeTo target: UUID,after: Bool) -> Bool {

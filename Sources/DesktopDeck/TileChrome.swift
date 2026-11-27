@@ -46,7 +46,7 @@ struct ConnectionMark: View {
 
 struct TileChrome: View {
     @ObservedObject var session: DesktopSession
-    let emphasized: Bool, open: ()->Void
+    let emphasized: Bool, gridReorder: Bool, open: ()->Void
     @Environment(\.displayScale) private var scale
     var body: some View {
         GeometryReader { geo in
@@ -60,14 +60,8 @@ struct TileChrome: View {
                     if footer {LinearGradient(colors:[.clear,.black.opacity(0.8)],startPoint:.top,endPoint:.bottom).frame(height:min(28,size.height*0.44))}
                 }.allowsHitTesting(false)
                 VStack(alignment:.leading,spacing:0) {
-                    HStack(spacing:5) {
-                        ConnectionMark(state:session.indicator,tint:session.tint)
-                        Text(session.profile.name).font(.system(size:12,weight:.semibold)).foregroundStyle(session.tint).lineLimit(1)
-                        if !session.isOnline && size.width>=175 {
-                            Text(session.connectionSummary).font(.system(size:10,weight:.medium)).foregroundStyle(.white.opacity(0.9)).lineLimit(1).truncationMode(.tail)
-                        }
-                    }.padding(inset).shadow(color:.black,radius:1,y:1).contentShape(Rectangle())
-                        .onTapGesture(perform:open).onDrag{NSItemProvider(object:session.id.uuidString as NSString)}
+                    if gridReorder { header(size:size,inset:inset).onDrag{NSItemProvider(object:session.id.uuidString as NSString)} }
+                    else { header(size:size,inset:inset) }
                     Spacer(minLength:0)
                     if footer {
                         HStack(spacing:4) {
@@ -80,6 +74,15 @@ struct TileChrome: View {
                 Rectangle().strokeBorder(borderColor,lineWidth:emphasized ? 2:1/max(1,scale)).allowsHitTesting(false)
             }.clipped()
         }
+    }
+    private func header(size: CGSize,inset: CGFloat) -> some View {
+        HStack(spacing:5) {
+            ConnectionMark(state:session.indicator,tint:session.tint)
+            Text(session.profile.name).font(.system(size:12,weight:.semibold)).foregroundStyle(session.tint).lineLimit(1)
+            if !session.isOnline && size.width>=175 {
+                Text(session.connectionSummary).font(.system(size:10,weight:.medium)).foregroundStyle(.white.opacity(0.9)).lineLimit(1).truncationMode(.tail)
+            }
+        }.padding(inset).shadow(color:.black,radius:1,y:1).contentShape(Rectangle()).onTapGesture(perform:open)
     }
     private var borderColor: Color {
         if emphasized {return session.tint}
