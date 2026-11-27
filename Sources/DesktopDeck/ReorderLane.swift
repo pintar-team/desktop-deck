@@ -26,6 +26,7 @@ struct ReorderLane<Cell: View>: View {
     var body: some View {
         GeometryReader { geometry in
             let size = geometry.size
+            let frame = geometry.frame(in: .global)
             let destination = lift.map { self.destination(for: $0, at: scrollOffset) }
             ScrollView(axis == .horizontal ? .horizontal : .vertical) {
                 ZStack(alignment: .topLeading) {
@@ -45,6 +46,8 @@ struct ReorderLane<Cell: View>: View {
                             ?? CGFloat(slot) * extent
                         cell(id)
                             .frame(width: cellWidth(size), height: cellHeight(size))
+                            .contentShape(Rectangle())
+                            .highPriorityGesture(reorderGesture(in: frame, row: index), isEnabled: axis == .vertical)
                             .overlay {
                                 if lifted { Rectangle().strokeBorder(tint, lineWidth: 2).allowsHitTesting(false) }
                             }
@@ -60,7 +63,7 @@ struct ReorderLane<Cell: View>: View {
                 .frame(width: axis == .horizontal ? contentLength : size.width,
                        height: axis == .vertical ? contentLength : size.height, alignment: .topLeading)
                 .contentShape(Rectangle())
-                .highPriorityGesture(reorderGesture(in: size))
+                .highPriorityGesture(reorderGesture(in: frame), isEnabled: axis == .horizontal)
             }
             .coordinateSpace(name: viewport)
             .scrollIndicators(.never)
@@ -97,24 +100,33 @@ struct ReorderLane<Cell: View>: View {
         return index
     }
 
-    private func reorderGesture(in size: CGSize) -> some Gesture {
-        DragGesture(minimumDistance: 6, coordinateSpace: .named(viewport))
+    private func reorderGesture(in frame: CGRect, row: Int? = nil) -> some Gesture {
+        func viewportPoint(_ point: CGPoint) -> CGPoint {
+            guard row != nil else { return point }
+            return CGPoint(x: point.x - frame.minX, y: point.y - frame.minY)
+        }
+
+        return DragGesture(minimumDistance: 6, coordinateSpace: row == nil ? .named(viewport) : .global)
             .updating($dragging) { _, active, _ in active = true }
             .onChanged { drag in
+                let pointer = viewportPoint(drag.location)
                 if lift != nil {
-                    lift?.pointer = drag.location
+                    lift?.pointer = pointer
                 } else if ids.count > 1 {
-                    let start = coordinate(drag.startLocation) + scrollOffset
-                    guard start >= 0, start < contentLength else { return }
-                    let index = Int(start / extent)
-                    lift = Lift(source: index, grabOffset: start - CGFloat(index) * extent, pointer: drag.location)
+                    // The sidebar grip belongs to the row that received the press.
+                    // Use window-space movement to keep that grip as rows slide.
+                    let start = (row == nil ? drag.startLocation.x : pointer.y - drag.translation.height) + scrollOffset
+                    guard row != nil || (0..<contentLength).contains(start) else { return }
+                    let index = row ?? Int(start / extent)
+                    lift = Lift(source: index, grabOffset: start - CGFloat(index) * extent, pointer: pointer)
                 }
             }
             .onEnded { drag in
                 guard var lifted = lift else { return }
                 lift = nil
-                guard CGRect(origin: .zero, size: size).contains(drag.location) else { return }
-                lifted.pointer = drag.location
+                let pointer = viewportPoint(drag.location)
+                guard CGRect(origin: .zero, size: frame.size).contains(pointer) else { return }
+                lifted.pointer = pointer
                 let target = destination(for: lifted, at: scrollOffset)
                 guard lifted.source != target, ids.indices.contains(lifted.source) else { return }
                 var order = ids
