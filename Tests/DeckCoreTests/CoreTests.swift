@@ -2,6 +2,25 @@ import XCTest
 @testable import DeckCore
 
 final class CoreTests: XCTestCase {
+    func testTrackpadOnlySendsWheelDetentsAfterEnoughMotion() {
+        var wheel = WheelAccumulator()
+        for event in 0..<39 {
+            XCTAssertEqual(wheel.steps(for: 1, precise: true, at: Double(event) / 60), 0)
+        }
+        XCTAssertEqual(wheel.steps(for: 1.1, precise: true, at: 39.0 / 60), 1)
+        XCTAssertEqual(wheel.steps(for: -80, precise: true, at: 40.0 / 60), -2)
+        XCTAssertEqual(wheel.steps(for: 1, precise: false, at: 41.0 / 60), 1)
+    }
+
+    func testTrackpadDoesNotCarryMotionAcrossGesturesOrSendAnUnboundedBurst() {
+        var wheel = WheelAccumulator()
+        XCTAssertEqual(wheel.steps(for: 30, precise: true, at: 1), 0)
+        XCTAssertEqual(wheel.steps(for: 12, precise: true, at: 1.1, begins: true), 0)
+        XCTAssertEqual(wheel.steps(for: 35, precise: true, at: 2), 0)
+        XCTAssertEqual(wheel.steps(for: .greatestFiniteMagnitude, precise: true, at: 2.01), 6)
+        XCTAssertEqual(wheel.steps(for: .infinity, precise: true, at: 2.02), 0)
+        XCTAssertEqual(wheel.steps(for: 1, precise: true, at: 2.03), 0)
+    }
     func testActivitySeparatesIdleFromUnavailableAndResetsAcrossConnections() {
         var meter=ActivitySampler()
         let desktop=ActivitySource.desktop(1),terminal=ActivitySource.terminal(UUID(),1)

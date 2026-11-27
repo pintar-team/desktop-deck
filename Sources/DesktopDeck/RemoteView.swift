@@ -12,6 +12,7 @@ import CVNC
                 texture=nil;previousTexture=nil;sequence = -1;connectionRevision = -1
                 blendTimer?.invalidate();blendTimer=nil;setNeedsDisplay(bounds)
                 modifiers=[];downSymbols.removeAll();pointerPresses.removeAll();panRevision=nil
+                wheel.reset()
             }
         }
     }
@@ -31,6 +32,8 @@ import CVNC
     private struct PointerRevision: Equatable {let connection: Int,geometry: Int}
     private var pointerPresses=[Int:PointerRevision]()
     private var panRevision: Int?
+    private var wheel = WheelAccumulator()
+    private var wheelConnection: Int?
     private var promisedImage: PromisedImageDrop?
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { interactive }
@@ -146,13 +149,31 @@ import CVNC
     override func rightMouseDragged(with e: NSEvent) { mouse(e,button:nil,down:nil) }
     override func otherMouseDragged(with e: NSEvent) {mouse(e,button:nil,down:nil)}
     override func scrollWheel(with e: NSEvent) {
-        guard interactive,let s=session else { return }
-        if e.modifierFlags.contains(.option) {s.humanInput();s.zoom=min(8,max(0.25,s.zoom*exp(-e.scrollingDeltaY*0.01))); setNeedsDisplay(bounds); return }
-        guard let p=point(e) else { return }; s.humanInput()
-        if e.scrollingDeltaY != 0 {s.scroll(p.0,p.1,up:e.scrollingDeltaY>0)}
+        guard interactive, let s = session, s.active else { wheel.reset(); return }
+        if e.modifierFlags.contains(.option) {
+            wheel.reset()
+            s.humanInput()
+            s.zoom = min(8, max(0.25, s.zoom * exp(-e.scrollingDeltaY * 0.01)))
+            setNeedsDisplay(bounds)
+            return
+        }
+        guard let p = point(e) else { wheel.reset(); return }
+        if wheelConnection != s.connectionRevision {
+            wheel.reset()
+            wheelConnection = s.connectionRevision
+        }
+        if e.phase.contains(.cancelled) || e.momentumPhase.contains(.cancelled) {
+            wheel.reset()
+            return
+        }
+        let steps = wheel.steps(for: e.hasPreciseScrollingDeltas ? e.scrollingDeltaY : e.deltaY,
+                                precise: e.hasPreciseScrollingDeltas, at: e.timestamp, begins: e.phase.contains(.began))
+        guard steps != 0 else { return }
+        s.humanInput()
+        s.scroll(p.0, p.1, steps: steps)
     }
     override func magnify(with e: NSEvent) { guard let s=session else { return };s.humanInput();s.zoom=min(8,max(0.25,s.zoom*(1+e.magnification))); setNeedsDisplay(bounds) }
-    override func resignFirstResponder() -> Bool {session?.releaseInput();modifiers=[];downSymbols.removeAll();pointerPresses.removeAll();panRevision=nil;return super.resignFirstResponder()}
+    override func resignFirstResponder() -> Bool {session?.releaseInput();modifiers=[];downSymbols.removeAll();pointerPresses.removeAll();panRevision=nil;wheel.reset();return super.resignFirstResponder()}
     @objc func paste(_ sender: Any?) {modifiers=[];session?.pasteMacClipboard()}
     @objc func copy(_ sender: Any?) {modifiers=[];session?.shortcut([0xffe3,0x63])}
     override func viewWillMove(toWindow newWindow: NSWindow?) {
@@ -199,7 +220,9 @@ import CVNC
     private func symbols(_ event: NSEvent) -> [UInt32] {
         let special:[UInt16:UInt32]=[36:0xff0d,48:0xff09,51:0xff08,53:0xff1b,117:0xffff,123:0xff51,124:0xff53,125:0xff54,126:0xff52,115:0xff50,119:0xff57,116:0xff55,121:0xff56,122:0xffbe,120:0xffbf,99:0xffc0,118:0xffc1,96:0xffc2,97:0xffc3,98:0xffc4,100:0xffc5,101:0xffc6,109:0xffc7,103:0xffc8,111:0xffc9]
         if let key=special[event.keyCode] { return [key] }
-        return (event.charactersIgnoringModifiers ?? "").unicodeScalars.map { deck_vnc_keysym($0.value) }
+        let isShortcut = !event.modifierFlags.intersection([.control, .option, .command]).isEmpty
+        let characters = isShortcut ? event.charactersIgnoringModifiers : event.characters
+        return (characters ?? "").unicodeScalars.map { deck_vnc_keysym($0.value) }
     }
     override func keyDown(with e: NSEvent) {
         guard interactive,let s=session,s.active else {return};s.humanInput()

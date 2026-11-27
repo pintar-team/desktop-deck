@@ -118,8 +118,12 @@ import CVNC
         guard active,let frame,x>=0,y>=0,x<frame.width,y<frame.height else { return }
         mask=buttons; lastPoint=(x,y); worker?.enqueue(.pointer(x,y,buttons))
     }
-    func scroll(_ x: Int,_ y: Int,up: Bool) {
-        let original=mask;pointer(x,y,original | (up ? 8:16));pointer(x,y,original)
+    func scroll(_ x: Int, _ y: Int, steps: Int) {
+        guard steps != 0, active, let frame, x >= 0, y >= 0, x < frame.width, y < frame.height else { return }
+        let wheelMask = mask | (steps > 0 ? 8 : 16)
+        let detent: [VNCWorker.Event] = [.pointer(x, y, wheelMask), .pointer(x, y, mask)]
+        let events = Array(repeating: detent, count: Int(min(steps.magnitude, 40))).flatMap { $0 }
+        if worker?.enqueueBatch(events) == true { lastPoint = (x, y) }
     }
     func text(_ text: String) throws {
         var commands=[VNCWorker.Event]()

@@ -4,7 +4,7 @@ import DeckCore
 
 @main struct DeckMCP {
     static func main() async throws {
-        let server=Server(name:"desktop-deck",version:"0.3.10",capabilities:.init(tools:.init()))
+        let server=Server(name:"desktop-deck",version:"0.3.11",capabilities:.init(tools:.init()))
         let client=UUID().uuidString
         await server.withMethodHandler(ListTools.self) { _ in
             .init(tools: ToolDefinitions.all.map { definition in
